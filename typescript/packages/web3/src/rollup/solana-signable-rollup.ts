@@ -1,10 +1,13 @@
 import type SovereignClient from "@sovereign-sdk/client";
+import { Multisig } from "@sovereign-sdk/multisig";
 import { type Signer, isLedgerSolanaSigner } from "@sovereign-sdk/signers";
 import type {
+  SignatureAndPubKey,
   Transaction,
   TransactionV1,
-  UnsignedTransaction,
+  UnsignedTransactionV0,
 } from "@sovereign-sdk/types";
+import type { HexString } from "@sovereign-sdk/utils";
 import { bytesToHex, hexToBytes } from "@sovereign-sdk/utils";
 import bs58 from "bs58";
 import { Base64 } from "js-base64";
@@ -20,13 +23,16 @@ import {
 } from "./standard-rollup";
 
 export type SolanaOffchainUnsignedTransaction<RuntimeCall> =
-  UnsignedTransaction<RuntimeCall> & {
+  UnsignedTransactionV0<RuntimeCall> & {
     chain_name: string;
   };
 
-export type SolanaOffchainUnsignedTransactionV1<RuntimeCall> =
+export type SolanaOffchainUnsignedTransactionV1<
+  RuntimeCall,
+  MultisigId = unknown,
+> =
   SolanaOffchainUnsignedTransaction<RuntimeCall> & {
-    multisig_id: string;
+    multisig_id: MultisigId;
     version: number;
   };
 
@@ -66,16 +72,11 @@ export type Authenticator =
 
 export type SolanaMultisigAuthenticator = "solanaSimple" | "solana";
 
-type SolanaMultisigParams = {
-  multisigAddress: Uint8Array;
-  multisigPubkeys: Uint8Array[];
-};
-
 export type SolanaMultisigSubmitParams =
   | {
       authenticator: "standard";
     }
-  | ({ authenticator: SolanaMultisigAuthenticator } & SolanaMultisigParams);
+  | { authenticator: SolanaMultisigAuthenticator };
 
 export type SolanaMultisigSignParams = SolanaMultisigSubmitParams & {
   signer: Signer;
@@ -232,25 +233,11 @@ export class SolanaSignableRollup<RuntimeCall> {
   }
 
   /**
-   * Helper to build an unsigned transaction using the standard type builder.
-   */
-  private async buildUnsignedTransaction(
-    runtimeCall: RuntimeCall,
-    overrides?: DeepPartial<UnsignedTransaction<RuntimeCall>>,
-  ): Promise<UnsignedTransaction<RuntimeCall>> {
-    return this.typeBuilder.unsignedTransaction({
-      runtimeCall,
-      overrides: overrides ?? {},
-      rollup: this.inner,
-    });
-  }
-
-  /**
    * Helper to build a transaction result object.
    */
   private async buildTransactionResult(
     response: SovereignClient.Sequencer.TxCreateResponse,
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
     pubkey: Uint8Array,
     signature: Uint8Array,
   ): Promise<TransactionResult<Transaction<RuntimeCall>>> {
@@ -281,25 +268,21 @@ export class SolanaSignableRollup<RuntimeCall> {
    * The canonical order is lexicographic by raw pubkey bytes.
    */
   private canonicalizeMultisigPubkeys(
-    multisigPubkeys?: Uint8Array[],
+    multisigPubkeys: HexString[],
   ): Uint8Array[] {
-    if (!multisigPubkeys) {
-      throw new Error(
-        "multisigPubkeys is required for Solana multisig transactions",
-      );
-    }
-
     if (
-      multisigPubkeys.length < 2 ||
+      multisigPubkeys.length < 1 ||
       multisigPubkeys.length > MAX_MULTISIG_SIGNERS
     ) {
       throw new Error(
-        `Invalid multisig signer count: expected 2-${MAX_MULTISIG_SIGNERS} signers, got ${multisigPubkeys.length}`,
+        `Invalid multisig signer count: expected 1-${MAX_MULTISIG_SIGNERS} signers, got ${multisigPubkeys.length}`,
       );
     }
 
     const seenPubkeys = new Set<string>();
-    for (const pubkey of multisigPubkeys) {
+    const pubkeyBytes = multisigPubkeys.map((pubkey) => hexToBytes(pubkey));
+
+    for (const pubkey of pubkeyBytes) {
       if (pubkey.length !== PUBKEY_SIZE) {
         throw new Error(
           `Invalid public key length: expected ${PUBKEY_SIZE} bytes, got ${pubkey.length}`,
@@ -313,14 +296,14 @@ export class SolanaSignableRollup<RuntimeCall> {
       seenPubkeys.add(pubkeyHex);
     }
 
-    return [...multisigPubkeys].sort(compareByteArrays);
+    return pubkeyBytes.sort(compareByteArrays);
   }
 
   /**
    * Helper to create and serialize a SolanaOffchainUnsignedTransaction to JSON bytes.
    */
   private async createSolanaJsonBytes(
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
   ): Promise<Uint8Array> {
     const serializer = await this.inner.serializer();
     const schema = serializer.schema;
@@ -342,7 +325,7 @@ export class SolanaSignableRollup<RuntimeCall> {
    * Returns the transaction result in the same format as standard rollup.
    */
   private async signWithSolanaSimpleAndSubmit(
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
     signer: Signer,
   ): Promise<TransactionResult<Transaction<RuntimeCall>>> {
     const jsonBytes = await this.createSolanaJsonBytes(unsignedTx);
@@ -369,7 +352,7 @@ export class SolanaSignableRollup<RuntimeCall> {
    * Returns the transaction result in the same format as standard rollup.
    */
   private async signWithSolanaSpecAndSubmit(
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
     signer: Signer,
   ): Promise<TransactionResult<Transaction<RuntimeCall>>> {
     const jsonBytes = await this.createSolanaJsonBytes(unsignedTx);
@@ -412,7 +395,7 @@ export class SolanaSignableRollup<RuntimeCall> {
     params: {
       signer: Signer;
       authenticator: Authenticator;
-      overrides?: DeepPartial<UnsignedTransaction<RuntimeCall>>;
+      overrides?: DeepPartial<UnsignedTransactionV0<RuntimeCall>>;
     },
     options?: SovereignClient.RequestOptions,
   ): Promise<TransactionResult<Transaction<RuntimeCall>>> {
@@ -433,17 +416,15 @@ export class SolanaSignableRollup<RuntimeCall> {
           options,
         );
       case "solanaSimple": {
-        const unsignedTx = await this.buildUnsignedTransaction(
-          runtimeCall,
-          params.overrides,
-        );
+        const unsignedTx = await this.inner.buildUnsignedTransaction(runtimeCall, {
+          overrides: params.overrides,
+        });
         return this.signWithSolanaSimpleAndSubmit(unsignedTx, params.signer);
       }
       case "solana": {
-        const unsignedTx = await this.buildUnsignedTransaction(
-          runtimeCall,
-          params.overrides,
-        );
+        const unsignedTx = await this.inner.buildUnsignedTransaction(runtimeCall, {
+          overrides: params.overrides,
+        });
         return this.signWithSolanaSpecAndSubmit(unsignedTx, params.signer);
       }
       default:
@@ -460,7 +441,7 @@ export class SolanaSignableRollup<RuntimeCall> {
    * @returns The transaction result
    */
   async signAndSubmitTransaction(
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
     params: { signer: Signer; authenticator: Authenticator },
     options?: SovereignClient.RequestOptions,
   ): Promise<TransactionResult<Transaction<RuntimeCall>>> {
@@ -487,13 +468,20 @@ export class SolanaSignableRollup<RuntimeCall> {
     }
   }
 
+  async buildUnsignedTransaction(
+    runtimeCall: RuntimeCall,
+    params?: { overrides?: DeepPartial<UnsignedTransactionV0<RuntimeCall>> },
+  ): Promise<UnsignedTransactionV0<RuntimeCall>> {
+    return this.inner.buildUnsignedTransaction(runtimeCall, params);
+  }
+
   /**
    * Creates V1 JSON bytes for a multisig transaction, including multisig_id and version.
    * The resulting JSON is what each signer signs directly (no discriminator prefix).
    */
   private async createMultisigJsonBytes(
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
-    multisigAddress: Uint8Array,
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
+    multisigId: unknown,
   ): Promise<Uint8Array> {
     const serializer = await this.inner.serializer();
     const schema = serializer.schema;
@@ -504,10 +492,7 @@ export class SolanaSignableRollup<RuntimeCall> {
       uniqueness: unsignedTx.uniqueness,
       details: unsignedTx.details,
       chain_name: chainName,
-      // Hardcoded to base58 encoding, only correct for rollups using Base58Address as their
-      // primary address type. Will be replaced with rollup-aware address formatting once the
-      // SDK supports flexible address encoding (see #2673).
-      multisig_id: bs58.encode(multisigAddress),
+      multisig_id: multisigId,
       version: 1,
     };
 
@@ -515,20 +500,84 @@ export class SolanaSignableRollup<RuntimeCall> {
   }
 
   /**
+   * Formats the multisig credential in the rollup's configured address format.
+   */
+  private async multisigIdFromMultisig(multisig: Multisig): Promise<unknown> {
+    const credentialId = multisig.getMultisigAddress();
+
+    if (this.inner.context.credentialIdToAddress) {
+      const serializer = await this.inner.serializer();
+      return this.inner.context.credentialIdToAddress(
+        credentialId,
+        serializer.schema,
+      );
+    }
+
+    return bs58.encode(credentialId);
+  }
+
+  /**
+   * Creates multisig state from a finalized transaction envelope.
+   */
+  private multisigFromTransaction(
+    tx: TransactionV1<RuntimeCall>["V1"],
+  ): Multisig {
+    return new Multisig({
+      signatures: tx.signatures,
+      unusedPubKeys: tx.unused_pub_keys,
+      minSigners: tx.min_signers,
+    });
+  }
+
+  /**
+   * Extracts the V0-shaped unsigned fields from a finalized multisig transaction.
+   */
+  private unsignedTxFromTransaction(
+    tx: TransactionV1<RuntimeCall>["V1"],
+  ): UnsignedTransactionV0<RuntimeCall> {
+    return {
+      runtime_call: tx.runtime_call,
+      uniqueness: tx.uniqueness,
+      details: tx.details,
+    };
+  }
+
+  private async createMultisigMessageSignature(
+    multisig: Multisig,
+    signer: Signer,
+    message: Uint8Array,
+  ): Promise<SignatureAndPubKey> {
+    const pubkey = await signer.publicKey();
+    const signerPubkeyHex = bytesToHex(pubkey);
+
+    if (!multisig.allPubKeys.includes(signerPubkeyHex)) {
+      throw new Error(
+        `Signer public key ${signerPubkeyHex} is not present in the multisig signer set`,
+      );
+    }
+
+    const signature = await signer.sign(message);
+
+    return {
+      pub_key: signerPubkeyHex,
+      signature: bytesToHex(signature),
+    };
+  }
+
+  /**
    * Creates the preamble+JSON bytes signed by every signer in a spec-compliant multisig flow.
    */
   private async createSpecCompliantMultisigSignedMessage(
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
-    multisigAddress: Uint8Array,
-    multisigPubkeys: Uint8Array[],
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
+    multisig: Multisig,
   ): Promise<Uint8Array> {
     const jsonBytes = await this.createMultisigJsonBytes(
       unsignedTx,
-      multisigAddress,
+      await this.multisigIdFromMultisig(multisig),
     );
     const chainHash = await this.inner.chainHash();
     const preamble = createSolanaPreamble(
-      multisigPubkeys,
+      this.canonicalizeMultisigPubkeys([...multisig.allPubKeys]),
       chainHash,
       jsonBytes.length,
     );
@@ -536,116 +585,73 @@ export class SolanaSignableRollup<RuntimeCall> {
     return this.combinePreambleAndMessage(preamble, jsonBytes);
   }
 
-  /**
-   * Signs an unsigned transaction using Solana offchain simple multisig signing.
-   */
-  private async signForSolanaSimpleMultisig(
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
-    signer: Signer,
-    multisigAddress: Uint8Array,
-    multisigPubkeys: Uint8Array[],
-  ): Promise<Transaction<RuntimeCall>> {
-    const pubkey = await signer.publicKey();
-    const signerPubkeyHex = bytesToHex(pubkey);
-    const multisigPubkeyHexes = multisigPubkeys.map(bytesToHex);
-
-    if (!multisigPubkeyHexes.includes(signerPubkeyHex)) {
-      throw new Error(
-        `Signer public key ${signerPubkeyHex} is not present in multisigPubkeys`,
-      );
-    }
-
-    const jsonBytes = await this.createMultisigJsonBytes(
-      unsignedTx,
-      multisigAddress,
-    );
-
-    const signature = await signer.sign(jsonBytes);
-
-    return this.typeBuilder.transaction({
-      unsignedTx,
-      sender: pubkey,
-      signature,
-      rollup: this.inner,
-    });
-  }
-
-  /**
-   * Signs an unsigned transaction using the spec-compliant multisig preamble.
-   */
-  private async signForSolanaSpecMultisig(
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
-    signer: Signer,
-    multisigAddress: Uint8Array,
-    multisigPubkeys: Uint8Array[],
-  ): Promise<Transaction<RuntimeCall>> {
-    const pubkey = await signer.publicKey();
-    const signerPubkeyHex = bytesToHex(pubkey);
-    const multisigPubkeyHexes = multisigPubkeys.map(bytesToHex);
-
-    if (!multisigPubkeyHexes.includes(signerPubkeyHex)) {
-      throw new Error(
-        `Signer public key ${signerPubkeyHex} is not present in multisigPubkeys`,
-      );
-    }
-
-    const signedMessageWithPreamble =
-      await this.createSpecCompliantMultisigSignedMessage(
-        unsignedTx,
-        multisigAddress,
-        multisigPubkeys,
-      );
-    const signature = await signer.sign(signedMessageWithPreamble);
-
-    return this.typeBuilder.transaction({
-      unsignedTx,
-      sender: pubkey,
-      signature,
-      rollup: this.inner,
-    });
-  }
-
-  /**
-   * Signs an unsigned transaction for use in a Solana offchain multisig.
-   *
-   * `authenticator: "standard"` delegates directly to the wrapped standard rollup.
-   * `authenticator: "solanaSimple"` signs the V1 JSON payload directly.
-   * `authenticator: "solana"` signs the spec-compliant preamble+JSON bytes.
-   * Solana multisig authenticators treat `multisigPubkeys` as an unordered set and
-   * canonicalize it before signing.
-   */
-  async signTransactionForMultisig(
-    unsignedTx: UnsignedTransaction<RuntimeCall>,
+  async createMultisigSignature(
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
+    multisig: Multisig,
     params: SolanaMultisigSignParams,
-  ): Promise<Transaction<RuntimeCall>> {
+  ): Promise<SignatureAndPubKey> {
     switch (params.authenticator) {
       case "standard":
-        return this.inner.signTransaction(unsignedTx, params.signer);
-      case "solanaSimple":
-        return this.signForSolanaSimpleMultisig(
+        return this.inner.createMultisigSignature(unsignedTx, multisig, {
+          signer: params.signer,
+        });
+      case "solanaSimple": {
+        const jsonBytes = await this.createMultisigJsonBytes(
           unsignedTx,
-          params.signer,
-          params.multisigAddress,
-          this.canonicalizeMultisigPubkeys(params.multisigPubkeys),
+          await this.multisigIdFromMultisig(multisig),
         );
-      case "solana":
-        return this.signForSolanaSpecMultisig(
-          unsignedTx,
+        return this.createMultisigMessageSignature(
+          multisig,
           params.signer,
-          params.multisigAddress,
-          this.canonicalizeMultisigPubkeys(params.multisigPubkeys),
+          jsonBytes,
         );
+      }
+      case "solana": {
+        const signedMessageWithPreamble =
+          await this.createSpecCompliantMultisigSignedMessage(
+            unsignedTx,
+            multisig,
+          );
+        return this.createMultisigMessageSignature(
+          multisig,
+          params.signer,
+          signedMessageWithPreamble,
+        );
+      }
     }
   }
 
+  async signMultisigTransaction(
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
+    multisig: Multisig,
+    params: SolanaMultisigSignParams,
+  ): Promise<void> {
+    const signature = await this.createMultisigSignature(
+      unsignedTx,
+      multisig,
+      params,
+    );
+    multisig.addSignature(signature);
+  }
+
+  finalizeMultisigTransaction(
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
+    multisig: Multisig,
+  ): TransactionV1<RuntimeCall> {
+    return this.inner.finalizeMultisigTransaction(unsignedTx, multisig);
+  }
+
   /**
-   * Builds a spec-compliant multisig envelope from a V1 transaction and ordered multisig pubkeys.
+   * Builds a spec-compliant multisig envelope from a V1 transaction.
    */
   private buildSpecCompliantMultisigEnvelope(
     tx: TransactionV1<RuntimeCall>["V1"],
     signedMessageWithPreamble: Uint8Array,
-    multisigPubkeys: Uint8Array[],
   ): SolanaOffchainSpecCompliantMultisigMessage {
+    const multisigPubkeys = this.canonicalizeMultisigPubkeys([
+      ...tx.signatures.map((signer) => signer.pub_key),
+      ...tx.unused_pub_keys,
+    ]);
     const multisigPubkeyHexes = multisigPubkeys.map(bytesToHex);
     const indexByPubkey = new Map<string, number>();
 
@@ -692,7 +698,7 @@ export class SolanaSignableRollup<RuntimeCall> {
 
     if (accountedPubkeys.size !== multisigPubkeys.length) {
       throw new Error(
-        "multisigPubkeys must contain every signer and unused pubkey exactly once",
+        "Multisig transaction payload must contain every signer exactly once",
       );
     }
 
@@ -709,36 +715,66 @@ export class SolanaSignableRollup<RuntimeCall> {
   }
 
   /**
-   * Submits a multisig transaction using the Solana offchain simple multisig format.
-   *
-   * Accepts the V1 transaction produced by `MultisigTransaction.asTransaction()`.
-   * `authenticator: "standard"` delegates directly to the wrapped standard rollup.
-   * Solana authenticators rebuild the appropriate Solana multisig envelope and
-   * submit it to the Solana offchain endpoint.
+   * Submits a multisig transaction. Accepts either unsigned V0 fields plus multisig
+   * state or an already-finalized V1 transaction.
    */
+  async submitMultisigTransaction(
+    unsignedTx: UnsignedTransactionV0<RuntimeCall>,
+    multisig: Multisig,
+    params: SolanaMultisigSubmitParams,
+    options?: SovereignClient.RequestOptions,
+  ): Promise<SovereignClient.Sequencer.TxCreateResponse>;
   async submitMultisigTransaction(
     multisigTx: TransactionV1<RuntimeCall>,
     params: SolanaMultisigSubmitParams,
+    options?: SovereignClient.RequestOptions,
+  ): Promise<SovereignClient.Sequencer.TxCreateResponse>;
+  async submitMultisigTransaction(
+    unsignedTxOrTx: UnsignedTransactionV0<RuntimeCall> | TransactionV1<RuntimeCall>,
+    multisigOrParams: Multisig | SolanaMultisigSubmitParams,
+    paramsOrOptions?: SolanaMultisigSubmitParams | SovereignClient.RequestOptions,
+    options?: SovereignClient.RequestOptions,
   ): Promise<SovereignClient.Sequencer.TxCreateResponse> {
-    const { V1: tx } = multisigTx;
+    const hasFinalizedTx = "V1" in unsignedTxOrTx;
+    const params = (
+      hasFinalizedTx ? multisigOrParams : paramsOrOptions
+    ) as SolanaMultisigSubmitParams;
+    const requestOptions = (
+      hasFinalizedTx ? paramsOrOptions : options
+    ) as SovereignClient.RequestOptions | undefined;
+    const finalizedTx = hasFinalizedTx
+      ? (unsignedTxOrTx as TransactionV1<RuntimeCall>)
+      : this.finalizeMultisigTransaction(
+          unsignedTxOrTx as UnsignedTransactionV0<RuntimeCall>,
+          multisigOrParams as Multisig,
+        );
+    const multisig = hasFinalizedTx
+      ? this.multisigFromTransaction(finalizedTx.V1)
+      : (multisigOrParams as Multisig);
 
-    const unsignedTx: UnsignedTransaction<RuntimeCall> = {
-      runtime_call: tx.runtime_call,
-      uniqueness: tx.uniqueness,
-      details: tx.details,
-    };
+    if (!multisig.isComplete) {
+      throw new Error("Multisig transaction is incomplete");
+    }
 
     switch (params.authenticator) {
       case "standard":
-        return this.inner.submitTransaction(
-          multisigTx as StandardRollupSpec<RuntimeCall>["Transaction"],
+        if (hasFinalizedTx) {
+          return this.inner.submitTransaction(
+            finalizedTx as StandardRollupSpec<RuntimeCall>["Transaction"],
+            requestOptions,
+          );
+        }
+        return this.inner.submitMultisigTransaction(
+          unsignedTxOrTx as UnsignedTransactionV0<RuntimeCall>,
+          multisig,
+          requestOptions,
         );
       case "solanaSimple": {
-        this.canonicalizeMultisigPubkeys(params.multisigPubkeys);
+        const unsignedTx = this.unsignedTxFromTransaction(finalizedTx.V1);
 
         const jsonBytes = await this.createMultisigJsonBytes(
           unsignedTx,
-          params.multisigAddress,
+          await this.multisigIdFromMultisig(multisig),
         );
         const wireBytes = new Uint8Array(1 + jsonBytes.length);
         wireBytes[0] = MULTISIG_SIMPLE_DISCRIMINATOR;
@@ -748,30 +784,28 @@ export class SolanaSignableRollup<RuntimeCall> {
         const serialized = this.serializeSolanaMultisigMessage({
           wire_bytes: wireBytes,
           chain_hash: chainHash,
-          signatures: tx.signatures.map((s) => ({
+          signatures: finalizedTx.V1.signatures.map((s) => ({
             signature: hexToBytes(s.signature),
             pub_key: hexToBytes(s.pub_key),
           })),
-          unused_pub_keys: tx.unused_pub_keys.map((pk) => hexToBytes(pk)),
-          min_signers: tx.min_signers,
+          unused_pub_keys: finalizedTx.V1.unused_pub_keys.map((pk) =>
+            hexToBytes(pk),
+          ),
+          min_signers: finalizedTx.V1.min_signers,
         });
 
         return this.submitSerializedMessage(serialized);
       }
       case "solana": {
-        const multisigPubkeys = this.canonicalizeMultisigPubkeys(
-          params.multisigPubkeys,
-        );
+        const unsignedTx = this.unsignedTxFromTransaction(finalizedTx.V1);
         const signedMessageWithPreamble =
           await this.createSpecCompliantMultisigSignedMessage(
             unsignedTx,
-            params.multisigAddress,
-            multisigPubkeys,
+            multisig,
           );
         const message = this.buildSpecCompliantMultisigEnvelope(
-          tx,
+          finalizedTx.V1,
           signedMessageWithPreamble,
-          multisigPubkeys,
         );
 
         return this.submitSolanaSpecMultisigMessage(message);
@@ -852,6 +886,10 @@ export class SolanaSignableRollup<RuntimeCall> {
 
   async dedup(address: Uint8Array) {
     return this.inner.dedup(address);
+  }
+
+  async dedupByCredentialId(credentialId: HexString | Uint8Array) {
+    return this.inner.dedupByCredentialId(credentialId);
   }
 
   async serializer() {

@@ -1,9 +1,8 @@
-import { sha256 } from "@noble/hashes/sha2";
 import SovereignClient from "@sovereign-sdk/client";
+import { Multisig } from "@sovereign-sdk/multisig";
 import { JsSerializer } from "@sovereign-sdk/serializers";
 import { Ed25519Signer } from "@sovereign-sdk/signers";
-import { LedgerSolanaSigner } from "@sovereign-sdk/signers/ledger-solana";
-import { bytesToHex, hexToBytes } from "@sovereign-sdk/utils";
+import { bytesToHex } from "@sovereign-sdk/utils";
 import { describe, expect, it, vi } from "vitest";
 import demoRollupSchema from "../../../__fixtures__/demo-rollup-schema.json";
 import {
@@ -425,8 +424,6 @@ describe("SolanaSignableRollup", () => {
     const signer2 = new Ed25519Signer(key2PrivHex);
     const signer3 = new Ed25519Signer(key3PrivHex);
 
-    // Compute the multisig address from the 3 public keys.
-    // Mirrors MultisigTransaction.getMultisigAddress() from @sovereign-sdk/multisig.
     const pub1 = await signer1.publicKey();
     const pub2 = await signer2.publicKey();
     const pub3 = await signer3.publicKey();
@@ -434,16 +431,10 @@ describe("SolanaSignableRollup", () => {
     const pub2Hex = bytesToHex(pub2);
     const pub3Hex = bytesToHex(pub3);
     const minSigners = 2;
-    const multisigPubkeys = [pub1, pub2, pub3];
-
-    const sortedPubKeys = [pub1Hex, pub2Hex, pub3Hex].sort();
-    const pubKeyBytes = sortedPubKeys.map((pk) => Array.from(hexToBytes(pk)));
-    const borshData = new Uint8Array(1 + 4 + 3 * 32);
-    const dv = new DataView(borshData.buffer);
-    borshData[0] = minSigners;
-    dv.setUint32(1, 3, true);
-    pubKeyBytes.forEach((pk, i) => borshData.set(pk, 5 + i * 32));
-    const multisigAddress = sha256(borshData);
+    const multisig = Multisig.fromPubKeys(
+      [pub1Hex, pub2Hex, pub3Hex],
+      minSigners,
+    );
 
     const runtimeCall = {
       bank: {
@@ -469,40 +460,18 @@ describe("SolanaSignableRollup", () => {
       },
     };
 
-    // Each signer signs independently (same order as Rust: key3, key1)
-    const signedTx3 = await rollup.signTransactionForMultisig(unsignedTx, {
+    await rollup.signMultisigTransaction(unsignedTx, multisig, {
       signer: signer3,
       authenticator: "solanaSimple",
-      multisigAddress,
-      multisigPubkeys,
     });
-    const signedTx1 = await rollup.signTransactionForMultisig(unsignedTx, {
+    await rollup.signMultisigTransaction(unsignedTx, multisig, {
       signer: signer1,
       authenticator: "solanaSimple",
-      multisigAddress,
-      multisigPubkeys,
     });
-
-    // Build V1 transaction manually (avoids a cyclic dependency on @sovereign-sdk/multisig)
-    const v0_3 = (signedTx3 as any).V0;
-    const v0_1 = (signedTx1 as any).V0;
-
-    const multisigV1 = {
-      V1: {
-        ...unsignedTx,
-        signatures: [
-          { pub_key: v0_3.pub_key, signature: v0_3.signature },
-          { pub_key: v0_1.pub_key, signature: v0_1.signature },
-        ],
-        unused_pub_keys: [pub2Hex],
-        min_signers: minSigners,
-      },
-    };
+    const multisigV1 = rollup.finalizeMultisigTransaction(unsignedTx, multisig);
 
     await rollup.submitMultisigTransaction(multisigV1 as any, {
       authenticator: "solanaSimple",
-      multisigAddress,
-      multisigPubkeys,
     });
 
     const actualJson = JSON.stringify(capturedPayload);
@@ -540,26 +509,20 @@ describe("SolanaSignableRollup", () => {
       },
     };
 
-    const signedTx = await rollup.signTransactionForMultisig(
-      unsignedTx as any,
-      {
-        signer,
-        authenticator: "standard",
-      },
-    );
+    const pubKeyHex = bytesToHex(await signer.publicKey());
+    const multisig = Multisig.fromPubKeys([pubKeyHex], 1);
 
-    expect(signedTx).toHaveProperty("V0");
+    await rollup.signMultisigTransaction(unsignedTx as any, multisig, {
+      signer,
+      authenticator: "standard",
+    });
+
+    expect(multisig.signaturesAndPubKeys).toHaveLength(1);
     expect(signer.sign).toHaveBeenCalledTimes(1);
 
     await rollup.submitMultisigTransaction(
-      {
-        V1: {
-          ...unsignedTx,
-          signatures: [],
-          unused_pub_keys: [],
-          min_signers: 0,
-        },
-      } as any,
+      unsignedTx as any,
+      multisig,
       {
         authenticator: "standard",
       },
@@ -611,16 +574,10 @@ describe("SolanaSignableRollup", () => {
     const pub2Hex = bytesToHex(pub2);
     const pub3Hex = bytesToHex(pub3);
     const minSigners = 2;
-    const multisigPubkeys = [pub1, pub2, pub3];
-
-    const sortedPubKeys = [pub1Hex, pub2Hex, pub3Hex].sort();
-    const pubKeyBytes = sortedPubKeys.map((pk) => Array.from(hexToBytes(pk)));
-    const borshData = new Uint8Array(1 + 4 + 3 * 32);
-    const dv = new DataView(borshData.buffer);
-    borshData[0] = minSigners;
-    dv.setUint32(1, 3, true);
-    pubKeyBytes.forEach((pk, i) => borshData.set(pk, 5 + i * 32));
-    const multisigAddress = sha256(borshData);
+    const multisig = Multisig.fromPubKeys(
+      [pub1Hex, pub2Hex, pub3Hex],
+      minSigners,
+    );
 
     const unsignedTx = {
       runtime_call: {
@@ -644,38 +601,18 @@ describe("SolanaSignableRollup", () => {
       },
     };
 
-    const signedTx3 = await rollup.signTransactionForMultisig(unsignedTx, {
+    await rollup.signMultisigTransaction(unsignedTx, multisig, {
       signer: signer3,
       authenticator: "solana",
-      multisigAddress,
-      multisigPubkeys,
     });
-    const signedTx1 = await rollup.signTransactionForMultisig(unsignedTx, {
+    await rollup.signMultisigTransaction(unsignedTx, multisig, {
       signer: signer1,
       authenticator: "solana",
-      multisigAddress,
-      multisigPubkeys,
     });
-
-    const v0_3 = (signedTx3 as any).V0;
-    const v0_1 = (signedTx1 as any).V0;
-
-    const multisigV1 = {
-      V1: {
-        ...unsignedTx,
-        signatures: [
-          { pub_key: v0_3.pub_key, signature: v0_3.signature },
-          { pub_key: v0_1.pub_key, signature: v0_1.signature },
-        ],
-        unused_pub_keys: [pub2Hex],
-        min_signers: minSigners,
-      },
-    };
+    const multisigV1 = rollup.finalizeMultisigTransaction(unsignedTx, multisig);
 
     await rollup.submitMultisigTransaction(multisigV1 as any, {
       authenticator: "solana",
-      multisigAddress,
-      multisigPubkeys,
     });
 
     const actualJson = JSON.stringify(capturedPayload.body);
@@ -703,10 +640,11 @@ describe("SolanaSignableRollup", () => {
           }),
       });
 
-      // Create a real LedgerSolanaSigner instance and mock its methods
-      const ledgerSigner = new LedgerSolanaSigner();
-      vi.spyOn(ledgerSigner, "publicKey").mockResolvedValue(new Uint8Array(32));
-      vi.spyOn(ledgerSigner, "sign").mockResolvedValue(new Uint8Array(64));
+      const ledgerSigner = {
+        __ledgerSolanaSigner: true as const,
+        publicKey: vi.fn().mockResolvedValue(new Uint8Array(32)),
+        sign: vi.fn().mockResolvedValue(new Uint8Array(64)),
+      };
 
       await rollup.signAndSubmitTransaction(
         {

@@ -13154,6 +13154,7 @@ dependencies = [
  "darling 0.21.3",
  "proc-macro2",
  "quote",
+ "serde_derive_internals",
  "syn 2.0.117",
 ]
 

@@ -40,12 +40,14 @@ If a credential has no explicit authorization, this canonical address is the nat
 ### Account-credential authorization map
 
 ```text
-account_owners[(address, credential_id)] = true
+account_owners[(address, credential_id)] = true | false
 ```
 
-This state map records authorization.
-A present entry means the credential is authorized to sign transactions that execute as the given address.
-The key is the exact `(address, credential_id)` pair, so this relation does not provide a credential-only lookup by itself.
+This state map records authorization overrides. `true` means the credential is authorized to sign transactions that execute as the given address.
+`false`
+explicitly revokes fallback authorization for that pair, including stateless
+canonical fallback. The key is the exact `(address, credential_id)` pair, so
+this relation does not provide a credential-only lookup by itself.
 
 This relation answers "may this credential act as this address?" once the target address is known.
 New `InsertCredentialId` calls write this relation.

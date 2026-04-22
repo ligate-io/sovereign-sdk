@@ -1,4 +1,4 @@
-use anyhow::{bail, Context as _};
+use anyhow::{anyhow, bail, Context as _};
 use schemars::JsonSchema;
 use sov_modules_api::macros::{serialize, UniversalWallet};
 use sov_modules_api::{Context, CredentialId, Spec, StateReader, TxState};
@@ -80,7 +80,7 @@ impl<S: Spec> Accounts<S> {
         credential: CredentialId,
         context: &Context<S>,
         state: &mut impl TxState<S>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         self.ensure_custom_account_mappings_enabled(state)?;
         self.ensure_caller_owns(&address, context)?;
         self.ensure_credential_not_authorized(&address, &credential, state)?;
@@ -95,7 +95,7 @@ impl<S: Spec> Accounts<S> {
         credential: CredentialId,
         context: &Context<S>,
         state: &mut impl TxState<S>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         self.ensure_custom_account_mappings_enabled(state)?;
         self.ensure_caller_owns(&address, context)?;
 
@@ -116,7 +116,7 @@ impl<S: Spec> Accounts<S> {
         new_credential: CredentialId,
         context: &Context<S>,
         state: &mut impl TxState<S>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         self.ensure_custom_account_mappings_enabled(state)?;
         self.ensure_caller_owns(&address, context)?;
 
@@ -137,7 +137,7 @@ impl<S: Spec> Accounts<S> {
         address: &S::Address,
         credential: &CredentialId,
         state: &mut impl TxState<S>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let key = AccountOwnerKey::new(*address, *credential);
         // Write `false` explicitly so a subsequent fallback (legacy
         // `accounts` mapping or canonical address) cannot re-authorize the
@@ -159,7 +159,7 @@ impl<S: Spec> Accounts<S> {
     fn ensure_custom_account_mappings_enabled(
         &self,
         state: &mut impl StateReader<User>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         if !self
             .enable_custom_account_mappings
             .get(state)
@@ -176,7 +176,7 @@ impl<S: Spec> Accounts<S> {
     /// Enforces that the caller is signing as `address`. The upstream
     /// authorization path has already verified the caller controls a
     /// credential authorized for `context.sender()`.
-    fn ensure_caller_owns(&self, address: &S::Address, context: &Context<S>) -> Result<()> {
+    fn ensure_caller_owns(&self, address: &S::Address, context: &Context<S>) -> anyhow::Result<()> {
         anyhow::ensure!(
             context.sender() == address,
             "Caller is not authorized to modify credentials for this address"

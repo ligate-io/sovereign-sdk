@@ -28,14 +28,16 @@ import {
 export type SolanaOffchainUnsignedTransaction<RuntimeCall> =
   UnsignedTransactionV0<RuntimeCall> & {
     chain_name: string;
+    version: 0;
   };
 
 export type SolanaOffchainUnsignedTransactionV1<
   RuntimeCall,
   MultisigId = unknown,
-> = SolanaOffchainUnsignedTransaction<RuntimeCall> & {
+> = UnsignedTransactionV0<RuntimeCall> & {
+  chain_name: string;
   multisig_id: MultisigId;
-  version: number;
+  version: 1;
 };
 
 export type SolanaOffchainSimpleMessage = {
@@ -310,6 +312,7 @@ export class SolanaSignableRollup<RuntimeCall> {
       uniqueness: unsignedTx.uniqueness,
       details: unsignedTx.details,
       chain_name: chainName,
+      version: 0,
     };
 
     // JSON serialize the Solana unsigned transaction

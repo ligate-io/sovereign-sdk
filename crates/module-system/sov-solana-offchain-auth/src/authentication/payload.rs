@@ -33,6 +33,9 @@ pub struct SolanaOffchainUnsignedTransactionV0<R: TransactionCallable, S: Spec> 
     /// from malicious chains (if the chain name matches some other chain the use but didn't expect
     /// to be signing for right now).
     pub chain_name: SafeString,
+    /// Message format version. Must be `0` for this struct.
+    #[serde(deserialize_with = "deserialize_version_0")]
+    pub version: u8,
 }
 
 impl<R, S> SolanaOffchainUnsignedTransactionV0<R, S>
@@ -81,6 +84,18 @@ pub struct SolanaOffchainUnsignedTransactionV1<R: TransactionCallable, S: Spec> 
     /// Message format version. Must be `1` for this struct.
     #[serde(deserialize_with = "deserialize_version_1")]
     pub version: u8,
+}
+
+fn deserialize_version_0<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u8, D::Error> {
+    let v = <u8 as serde::Deserialize>::deserialize(deserializer)?;
+    if v != 0 {
+        return Err(serde::de::Error::custom(format!(
+            "expected message version 0, got {v}"
+        )));
+    }
+    Ok(v)
 }
 
 fn deserialize_version_1<'de, D: serde::Deserializer<'de>>(

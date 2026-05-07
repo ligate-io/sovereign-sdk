@@ -68,7 +68,7 @@ impl<S: Spec> Accounts<S> {
     ) -> anyhow::Result<()> {
         self.ensure_custom_account_mappings_enabled(state)?;
 
-        self.exit_if_credential_exists(&new_credential_id, context.sender(), state)?;
+        self.ensure_credential_not_authorized(context.sender(), &new_credential_id, state)?;
 
         self.authorize_credential(context.sender(), &new_credential_id, state)?;
         Ok(())
@@ -139,20 +139,9 @@ impl<S: Spec> Accounts<S> {
         state: &mut impl TxState<S>,
     ) -> anyhow::Result<()> {
         let key = AccountOwnerKey::new(*address, *credential);
-        // Write `false` explicitly so a subsequent fallback (legacy
-        // `accounts` mapping or canonical address) cannot re-authorize the
-        // tuple.
+        // Write `false` explicitly so the canonical-address fallback in
+        // `is_authorized_for` cannot re-authorize the tuple.
         self.account_owners.set(&key, &false, state)?;
-
-        if self
-            .accounts
-            .get(credential, state)
-            .map_err(|err| anyhow!("Error raised while getting account: {err:?}"))?
-            .is_some_and(|account| account.addr == *address)
-        {
-            self.accounts.delete(credential, state)?;
-        }
-
         Ok(())
     }
 
@@ -184,10 +173,10 @@ impl<S: Spec> Accounts<S> {
         Ok(())
     }
 
-    fn exit_if_credential_exists(
+    fn ensure_credential_not_authorized(
         &self,
-        new_credential_id: &CredentialId,
         address: &S::Address,
+        credential: &CredentialId,
         state: &mut impl StateReader<User>,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(

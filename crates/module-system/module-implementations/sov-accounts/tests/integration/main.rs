@@ -539,7 +539,7 @@ fn make_v1_tx(
 fn make_v1_tx_with_call(
     multisig: &sov_modules_api::Multisig<<<S as Spec>::CryptoSpec as CryptoSpec>::PublicKey>,
     call: CallMessage<S>,
-    target_address: Option<<S as Spec>::Address>,
+    address_override: Option<<S as Spec>::Address>,
     generation: u64,
 ) -> Version1<RT, S> {
     UnsignedTransactionV0::<RT, S>::new_with_details(
@@ -1020,7 +1020,7 @@ fn test_add_credential_to_address_by_owner() {
             let accounts = Accounts::<S>::default();
             assert!(
                 accounts
-                    .is_authorized(&owner_address, &new_credential, state)
+                    .is_authorized_for(&owner_address, &new_credential, state)
                     .unwrap(),
                 "new credential should be authorized for owner's address"
             );
@@ -1056,7 +1056,7 @@ fn test_add_credential_to_address_bootstrap() {
             assert!(result.tx_receipt.is_successful());
             let accounts = Accounts::<S>::default();
             assert!(accounts
-                .is_authorized(&fresh_address, &extra_credential, state)
+                .is_authorized_for(&fresh_address, &extra_credential, state)
                 .unwrap());
         }),
     });
@@ -1101,7 +1101,7 @@ fn test_add_credential_to_address_non_owner_rejected() {
             // Confirm the attacker's credential was never written under the victim.
             let accounts = Accounts::<S>::default();
             assert!(!accounts
-                .is_authorized(&victim_address, &attacker_credential, state)
+                .is_authorized_for(&victim_address, &attacker_credential, state)
                 .unwrap());
         }),
     });
@@ -1183,11 +1183,11 @@ fn test_remove_credential_from_address_by_owner() {
             assert!(result.tx_receipt.is_successful());
             let accounts = Accounts::<S>::default();
             assert!(!accounts
-                .is_authorized(&owner_address, &removed_credential, state)
+                .is_authorized_for(&owner_address, &removed_credential, state)
                 .unwrap());
             assert!(
                 accounts
-                    .is_authorized(&owner_address, &kept_credential, state)
+                    .is_authorized_for(&owner_address, &kept_credential, state)
                     .unwrap(),
                 "unrelated authorization should survive the revocation"
             );
@@ -1269,7 +1269,7 @@ fn test_remove_credential_non_owner_rejected() {
             // Victim's authorization is unaffected.
             let accounts = Accounts::<S>::default();
             assert!(accounts
-                .is_authorized(&victim_address, &victim_credential, state)
+                .is_authorized_for(&victim_address, &victim_credential, state)
                 .unwrap());
         }),
     });
@@ -1353,7 +1353,7 @@ fn test_remove_last_credential_orphans_address() {
             assert!(result.tx_receipt.is_successful());
             let accounts = Accounts::<S>::default();
             assert!(!accounts
-                .is_authorized(&alice_address, &multisig_credential_id, state)
+                .is_authorized_for(&alice_address, &multisig_credential_id, state)
                 .unwrap());
         }),
     });
@@ -1439,10 +1439,10 @@ fn test_multisig_key_rotation() {
             assert!(result.tx_receipt.is_successful());
             let accounts = Accounts::<S>::default();
             assert!(accounts
-                .is_authorized(&target_address, &credential_id_1, state)
+                .is_authorized_for(&target_address, &credential_id_1, state)
                 .unwrap());
             assert!(accounts
-                .is_authorized(&target_address, &credential_id_2, state)
+                .is_authorized_for(&target_address, &credential_id_2, state)
                 .unwrap());
         }),
     });
@@ -1465,10 +1465,10 @@ fn test_multisig_key_rotation() {
             assert!(result.tx_receipt.is_successful());
             let accounts = Accounts::<S>::default();
             assert!(!accounts
-                .is_authorized(&target_address, &credential_id_1, state)
+                .is_authorized_for(&target_address, &credential_id_1, state)
                 .unwrap());
             assert!(accounts
-                .is_authorized(&target_address, &credential_id_2, state)
+                .is_authorized_for(&target_address, &credential_id_2, state)
                 .unwrap());
         }),
     });
@@ -1605,14 +1605,14 @@ fn test_rotate_credential_by_owner() {
             assert!(result.tx_receipt.is_successful());
             let accounts = Accounts::<S>::default();
             assert!(!accounts
-                .is_authorized(&owner_address, &old_credential, state)
+                .is_authorized_for(&owner_address, &old_credential, state)
                 .unwrap());
             assert!(accounts
-                .is_authorized(&owner_address, &new_credential, state)
+                .is_authorized_for(&owner_address, &new_credential, state)
                 .unwrap());
             assert!(
                 accounts
-                    .is_authorized(&owner_address, &unrelated_credential, state)
+                    .is_authorized_for(&owner_address, &unrelated_credential, state)
                     .unwrap(),
                 "unrelated authorization must survive rotation"
             );
@@ -1656,7 +1656,7 @@ fn test_rotate_credential_old_not_authorized_rejected() {
             // The revert must leave the new tuple unwritten.
             let accounts = Accounts::<S>::default();
             assert!(!accounts
-                .is_authorized(&owner_address, &new_credential, state)
+                .is_authorized_for(&owner_address, &new_credential, state)
                 .unwrap());
         }),
     });
@@ -1712,10 +1712,10 @@ fn test_rotate_credential_new_already_authorized_rejected() {
             // back the delete.
             let accounts = Accounts::<S>::default();
             assert!(accounts
-                .is_authorized(&owner_address, &old_credential, state)
+                .is_authorized_for(&owner_address, &old_credential, state)
                 .unwrap());
             assert!(accounts
-                .is_authorized(&owner_address, &new_credential, state)
+                .is_authorized_for(&owner_address, &new_credential, state)
                 .unwrap());
         }),
     });
@@ -1761,10 +1761,10 @@ fn test_rotate_credential_non_owner_rejected() {
             }
             let accounts = Accounts::<S>::default();
             assert!(accounts
-                .is_authorized(&victim_address, &victim_credential, state)
+                .is_authorized_for(&victim_address, &victim_credential, state)
                 .unwrap());
             assert!(!accounts
-                .is_authorized(&victim_address, &attacker_credential, state)
+                .is_authorized_for(&victim_address, &attacker_credential, state)
                 .unwrap());
         }),
     });
@@ -1850,10 +1850,10 @@ fn test_multisig_key_rotation_atomic() {
             assert!(result.tx_receipt.is_successful());
             let accounts = Accounts::<S>::default();
             assert!(!accounts
-                .is_authorized(&target_address, &credential_id_1, state)
+                .is_authorized_for(&target_address, &credential_id_1, state)
                 .unwrap());
             assert!(accounts
-                .is_authorized(&target_address, &credential_id_2, state)
+                .is_authorized_for(&target_address, &credential_id_2, state)
                 .unwrap());
         }),
     });

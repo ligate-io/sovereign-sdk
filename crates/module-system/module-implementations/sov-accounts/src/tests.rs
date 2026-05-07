@@ -1,10 +1,14 @@
 use sov_modules_api::prelude::*;
 use sov_modules_api::sov_universal_wallet::schema::Schema;
+use sov_modules_api::Spec;
+use sov_test_utils::TestSpec;
 
 use crate::CallMessage;
 
 #[test]
 fn test_display_accounts_call() {
+    type S = TestSpec;
+
     #[derive(Debug, Clone, PartialEq, borsh::BorshSerialize, UniversalWallet)]
     enum RuntimeCall {
         Accounts(CallMessage<S>),

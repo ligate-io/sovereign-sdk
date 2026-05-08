@@ -316,6 +316,9 @@ impl<S: Spec, T> TransactionAuthorizer<S> for StandardProvenRollupCapabilities<'
         execution_context: ExecutionContext,
         sequencer_type: SequencerType,
     ) -> anyhow::Result<Context<S>> {
+        // `Some` requires an explicit `(addr, cred)` entry — overriding the default
+        // is opt-in. `None` allows the canonical-address fallback but still rejects
+        // when an explicit `false` (e.g. from `revoke_credential`) is recorded.
         let sender = match auth_data.address_override {
             Some(address_override) => {
                 anyhow::ensure!(
@@ -328,7 +331,17 @@ impl<S: Spec, T> TransactionAuthorizer<S> for StandardProvenRollupCapabilities<'
                 );
                 address_override
             }
-            None => auth_data.default_address,
+            None => {
+                anyhow::ensure!(
+                    self.accounts.is_authorized_for(
+                        &auth_data.default_address,
+                        &auth_data.credential_id,
+                        state,
+                    )?,
+                    "not authorized for resolved address"
+                );
+                auth_data.default_address
+            }
         };
 
         Ok(Context::new(
@@ -362,7 +375,17 @@ impl<S: Spec, T> TransactionAuthorizer<S> for StandardProvenRollupCapabilities<'
                 );
                 address_override
             }
-            None => auth_data.default_address,
+            None => {
+                anyhow::ensure!(
+                    self.accounts.is_authorized_for(
+                        &auth_data.default_address,
+                        &auth_data.credential_id,
+                        state,
+                    )?,
+                    "not authorized for resolved address"
+                );
+                auth_data.default_address
+            }
         };
 
         Ok(Context::new(

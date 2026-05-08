@@ -1376,7 +1376,7 @@ fn test_remove_last_credential_orphans_address() {
             TxEffect::Skipped(SkippedTxContents { error, .. }) => {
                 let msg = error.to_string();
                 assert!(
-                    msg.contains("not authorized for target address"),
+                    msg.contains("not authorized for address override"),
                     "expected resolver skip; got: {msg}"
                 );
             }
@@ -1511,7 +1511,7 @@ fn test_multisig_key_rotation() {
             TxEffect::Skipped(SkippedTxContents { error, .. }) => {
                 let msg = error.to_string();
                 assert!(
-                    msg.contains("not authorized for target address"),
+                    msg.contains("not authorized for address override"),
                     "expected resolver skip after rotation; got: {msg}"
                 );
             }
@@ -1920,7 +1920,7 @@ fn test_multisig_key_rotation_atomic() {
             TxEffect::Skipped(SkippedTxContents { error, .. }) => {
                 let msg = error.to_string();
                 assert!(
-                    msg.contains("not authorized for target address"),
+                    msg.contains("not authorized for address override"),
                     "expected resolver skip after rotation; got: {msg}"
                 );
             }

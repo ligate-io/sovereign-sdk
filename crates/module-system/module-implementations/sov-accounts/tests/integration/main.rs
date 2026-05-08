@@ -546,7 +546,7 @@ fn make_v1_tx_with_call(
         TestAccountsRuntimeCall::Accounts(call),
         sov_modules_api::capabilities::UniquenessData::Generation(generation),
         default_test_tx_details::<S>(),
-        target_address,
+        address_override,
     )
     .to_multisig_tx(multisig.clone())
 }

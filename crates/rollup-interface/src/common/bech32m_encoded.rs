@@ -252,9 +252,10 @@ bech32m_hash_type! {
 }
 
 bech32m_hash_type! {
-    /// State root. Bech32m-encoded with HRP `lsr` (`lsr1...`). 32 bytes,
-    /// matching `<S::Storage as Storage>::Root` in the runtime.
-    LsrHash, 32, lsr_hrp
+    /// State root. Bech32m-encoded with HRP `lsr` (`lsr1...`). 64 bytes,
+    /// matching the NOMT storage backend's root size at runtime
+    /// (NOMT uses a 64-byte root; JMT uses 32; Ligate runs on NOMT).
+    LsrHash, 64, lsr_hrp
 }
 
 bech32m_hash_type! {
@@ -310,10 +311,13 @@ macro_rules! impl_hexstring_cross_conv_32 {
 
 impl_hexstring_cross_conv_32!(LtxHash);
 impl_hexstring_cross_conv_32!(LblkHash);
-impl_hexstring_cross_conv_32!(LsrHash);
 impl_hexstring_cross_conv_32!(LbaHash);
 impl_hexstring_cross_conv_32!(LschHash);
 impl_hexstring_cross_conv_32!(LbzHash);
+// LsrHash is 64 bytes — see note on the type definition. No cross-conv
+// with `HexString<[u8; 32]>` because the lengths don't match; the only
+// callers building one go through `LsrHash::new(slot.state_root)` after
+// a length check.
 
 #[cfg(test)]
 mod tests {
@@ -341,7 +345,7 @@ mod tests {
 
     #[test]
     fn lsr_round_trip() {
-        let bytes = [0xef; 32];
+        let bytes = [0xef; 64];
         let h = LsrHash::new(bytes);
         let s = h.to_string();
         assert!(s.starts_with("lsr1"), "got {s}");

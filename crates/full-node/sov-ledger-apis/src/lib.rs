@@ -1002,13 +1002,14 @@ impl<B, TxReceipt: TxReceiptContents, E> Slot<B, TxReceipt, E> {
             None => None,
         };
 
-        // Runtime invariant: `<S::Storage as Storage>::Root` is `[u8; 32]`.
-        // Any other length is a node-level bug, surface it loudly.
-        let state_root: [u8; 32] = slot
+        // NOMT (the storage backend Ligate runs on) produces a 64-byte
+        // state root. Any other length is a node-level bug, surface it
+        // loudly.
+        let state_root: [u8; 64] = slot
             .state_root
             .as_slice()
             .try_into()
-            .expect("state root must be 32 bytes");
+            .expect("state root must be 64 bytes");
         Self {
             number: slot.number,
             hash: BlockHash::new(slot.hash),

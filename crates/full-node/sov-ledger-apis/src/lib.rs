@@ -27,6 +27,7 @@ use sov_rest_utils::{
     PageSelection, Pagination, Path, Query,
 };
 use sov_rollup_interface::common::{HexHash, HexString, SlotNumber};
+use sov_rollup_interface::TxHash;
 use sov_rollup_interface::node::ledger_api::{
     AggregatedProofResponse, BatchIdAndOffset, BatchIdentifier, BatchResponse, EventIdentifier,
     FinalityStatus, IncludeChildren, ItemOrHash, LedgerStateProvider, QueryMode, SlotIdAndOffset,
@@ -944,7 +945,12 @@ struct SlotEvents<E> {
 #[serde(untagged)]
 enum NumberOrHash {
     Number(#[serde_as(as = "serde_with::DisplayFromStr")] u64),
-    Hash(HexHash),
+    // Accepts the chain's `ltx1...` bech32m form via `LtxHash::FromStr`,
+    // and the legacy `0x...` hex form (for backwards-compat) via the
+    // same impl. Slot-hash paths that aren't tx hashes (`lblk1...`) hit
+    // the FromStr error path and fall through to a 400; in practice
+    // slot lookups use the number variant anyway.
+    Hash(TxHash),
 }
 
 impl NumberOrHash {

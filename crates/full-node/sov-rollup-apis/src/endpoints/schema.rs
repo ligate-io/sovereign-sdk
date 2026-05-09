@@ -10,6 +10,7 @@ use sov_modules_api::prelude::tokio::sync::watch;
 use sov_modules_api::sov_universal_wallet::schema::Schema;
 use sov_modules_api::{ConcurrentStateCheckpoint, HexHash, Spec};
 use sov_rest_utils::{errors, preconfigured_router_layers};
+use sov_rollup_interface::ChainHash;
 
 /// Trait for the `/rollup/schema` endpoint.
 ///
@@ -88,11 +89,13 @@ impl<S: Spec> StandardSchemaEndpoint<S> {
     }
 }
 
-/// Response for the schema endpoint.
+/// Response for the schema endpoint. `chain_hash` is bech32m-encoded
+/// with HRP `lsch` (`lsch1...`); wallets use it to verify the schema
+/// they hold matches the one the chain expects.
 #[derive(Debug, Clone, Serialize)]
 pub struct StandardSchemaResponse {
     schema: serde_json::Value,
-    chain_hash: HexHash,
+    chain_hash: ChainHash,
 }
 
 impl<S: Spec> SchemaEndpoint for StandardSchemaEndpoint<S> {
@@ -113,7 +116,7 @@ impl<S: Spec> SchemaEndpoint for StandardSchemaEndpoint<S> {
 
         Ok(StandardSchemaResponse {
             schema: self.schema.clone(),
-            chain_hash: resolved.primary.into(),
+            chain_hash: ChainHash::new(resolved.primary),
         })
     }
 }

@@ -5,7 +5,7 @@ use std::fmt::{Debug, Formatter};
 pub use address::{MockAddress, MOCK_SEQUENCER_DA_ADDRESS};
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
-use sov_rollup_interface::common::HexHash;
+use sov_rollup_interface::common::LblkHash;
 use sov_rollup_interface::da::{
     BlockHashTrait, BlockHeaderTrait, CountedBufReader, DaProof, RelevantBlobs, RelevantProofs,
     Time,
@@ -38,13 +38,13 @@ pub struct MockHash(pub [u8; 32]);
 
 impl Debug for MockHash {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", HexHash::new(self.0))
+        write!(f, "{}", LblkHash::new(self.0))
     }
 }
 
 impl core::fmt::Display for MockHash {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", HexHash::new(self.0))
+        write!(f, "{}", LblkHash::new(self.0))
     }
 }
 
@@ -52,7 +52,9 @@ impl core::str::FromStr for MockHash {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let inner = HexHash::from_str(s)?;
+        // `LblkHash::FromStr` accepts both `lblk1...` and `0x...` for
+        // backward compat.
+        let inner = LblkHash::from_str(s)?;
         Ok(MockHash(inner.0))
     }
 }

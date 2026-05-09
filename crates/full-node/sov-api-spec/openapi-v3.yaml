@@ -909,8 +909,11 @@ components:
     Hash:
       type: string
       title: Hash
-      pattern: ^0x[a-fA-F0-9]{64}$
-      description: Hash
+      pattern: ^(l(tx|blk|sr|ba|sch|bz)1[023456789acdefghjklmnpqrstuvwxyz]+|0x[a-fA-F0-9]{64})$
+      description: |
+        Hash. Bech32m-encoded with one of the chain's HRPs (`ltx`, `lblk`,
+        `lsr`, `lba`, `lsch`, `lbz`); legacy `0x...` hex form is also
+        accepted on input for backward compatibility.
     HexString:
       type: string
       pattern: ^0x[a-fA-F0-9]+$
@@ -918,8 +921,10 @@ components:
       example: "0x71c7656ec7ab88b098defb751b7401b5f6d8976f"
     TxHash:
       type: string
-      pattern: ^0x[a-fA-F0-9]+$
-      description: The hash of a transaction
+      pattern: ^(ltx1[023456789acdefghjklmnpqrstuvwxyz]+|0x[a-fA-F0-9]+)$
+      description: |
+        Transaction hash. Bech32m-encoded with HRP `ltx` (`ltx1...`)
+        on output; legacy `0x...` hex form is accepted on input.
     TxInfo:
       type: object
       properties:

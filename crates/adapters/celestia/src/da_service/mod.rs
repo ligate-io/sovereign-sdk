@@ -27,8 +27,8 @@ use celestia_types::namespace_data::NamespaceData;
 use celestia_types::nmt::Namespace;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use sov_rollup_interface::common::HexHash;
 use sov_rollup_interface::da::{DaProof, DaSpec, RelevantBlobs, RelevantProofs};
+use sov_rollup_interface::BlobHash;
 use sov_rollup_interface::node::da::{
     run_maybe_retryable_async_fn_with_retries, DaService, MaybeRetryable, SubmitBlobReceipt,
 };
@@ -113,7 +113,7 @@ impl CelestiaService {
         };
         let blob = JsonBlob::new(namespace, blob.to_vec(), Some(signer.0))
             .expect("Bug in CelestiaAdapter");
-        let blob_hash = HexHash::new(*blob.commitment.hash());
+        let blob_hash = BlobHash::new(*blob.commitment.hash());
         tracing::debug!(
             namespace = ?ns,
             commitment = %blob_hash,

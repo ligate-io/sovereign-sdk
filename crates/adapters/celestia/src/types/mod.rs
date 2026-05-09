@@ -8,8 +8,9 @@ use celestia_types::namespace_data::NamespaceData;
 pub use celestia_types::nmt::Namespace;
 pub use error::*;
 use serde::{Deserialize, Serialize};
-use sov_rollup_interface::common::HexHash;
+use sov_rollup_interface::common::{lblk_hrp, LblkHash};
 use sov_rollup_interface::da::{BlobReaderTrait, BlockHashTrait, CountedBufReader};
+use sov_rollup_interface::BlobHash;
 use sov_universal_wallet::schema::OverrideSchema;
 use sov_universal_wallet::UniversalWallet;
 
@@ -22,11 +23,13 @@ pub(crate) const SUPPORTED_SHARE_VERSION: u8 = 1;
 #[derive(Debug, PartialEq, PartialOrd, Ord, Clone, Eq, Hash, Serialize, Deserialize)]
 pub struct TmHash(pub tendermint::Hash);
 
-// Schema type for TmHash to enable UniversalWallet support
+// Schema type for TmHash to enable UniversalWallet support. Display
+// is bech32m with HRP `lblk` so wallet UIs surface block hashes
+// consistently with the rest of the chain (`lblk1...`).
 #[derive(UniversalWallet)]
 #[allow(dead_code)]
 #[doc(hidden)]
-pub struct TmHashSchema(#[sov_wallet(display(hex))] [u8; 32]);
+pub struct TmHashSchema(#[sov_wallet(display(bech32m(prefix = "lblk_hrp()")))] [u8; 32]);
 
 impl OverrideSchema for TmHash {
     type Output = TmHashSchema;
@@ -58,7 +61,7 @@ impl AsRef<[u8]> for TmHash {
 
 impl core::fmt::Display for TmHash {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "0x{}", self.0)
+        write!(f, "{}", LblkHash::new(*self.inner()))
     }
 }
 
@@ -66,6 +69,12 @@ impl core::str::FromStr for TmHash {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Accept the chain's `lblk1...` form first, falling back to
+        // tendermint's hex form (with or without `0x`) so existing
+        // celestia tooling keeps working.
+        if let Ok(lblk) = LblkHash::from_str(s) {
+            return Ok(TmHash(tendermint::Hash::Sha256(lblk.0)));
+        }
         let stripped = s.strip_prefix("0x").unwrap_or(s);
         let inner = tendermint::Hash::from_str(stripped)?;
         Ok(TmHash(inner))
@@ -103,7 +112,7 @@ pub struct BlobWithSender {
     // Range in the entire namespace
     pub(crate) range_in_namespace: Range<usize>,
     pub(crate) sender: CelestiaAddress,
-    pub hash: HexHash,
+    pub hash: BlobHash,
 }
 
 impl BlobReaderTrait for BlobWithSender {
@@ -176,7 +185,7 @@ impl NamespaceRelevantData {
             let commitment =
                 celestia_types::Commitment::from_shares(self.namespace, &share_seq.shares)
                     .expect("blob must be valid");
-            let hash = HexHash::new(*commitment.hash());
+            let hash = BlobHash::new(*commitment.hash());
 
             let range_in_namespace = share_seq.range_in_ns.clone();
             let Ok(blob) = crate::shares::Blob::try_from(share_seq) else {

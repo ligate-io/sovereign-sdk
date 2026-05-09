@@ -6,6 +6,7 @@ use sov_rollup_interface::common::HexHash;
 use sov_rollup_interface::da::{BlobReaderTrait, BlockHeaderTrait};
 use sov_rollup_interface::node::da::{DaService, SlotData, SubmitBlobReceipt};
 use sov_rollup_interface::node::{future_or_shutdown, FutureOrShutdownOutput};
+use sov_rollup_interface::BlobHash;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -560,7 +561,7 @@ impl StorableMockDaService {
         };
 
         Ok(SubmitBlobReceipt {
-            blob_hash: HexHash::new(blob_hash.0),
+            blob_hash: BlobHash::new(blob_hash.0),
             da_transaction_id: blob_hash,
         })
     }
@@ -599,7 +600,7 @@ impl StorableMockDaService {
         self.aggregated_proof_sender.send(()).unwrap();
 
         Ok(SubmitBlobReceipt {
-            blob_hash: HexHash::new(blob_hash.0),
+            blob_hash: BlobHash::new(blob_hash.0),
             da_transaction_id: blob_hash,
         })
     }

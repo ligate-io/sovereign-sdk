@@ -9,8 +9,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
-use crate::common::HexHash;
 use crate::da::{BlockHeaderTrait, DaSpec, DaVerifier, RelevantBlobs, RelevantProofs, Time};
+use crate::BlobHash;
 
 /// Perform a checked arithmetic, returning None if the result is invalid.
 pub trait CheckedMath<Rhs = Self> {
@@ -97,7 +97,8 @@ impl<E> From<E> for MaybeRetryable<E> {
 )]
 pub struct SubmitBlobReceipt<T: Debug + Clone> {
     /// Computed blob hash, so it can be identified by fetcher of the blobs.
-    pub blob_hash: HexHash,
+    /// Bech32m-encoded with HRP `lbz` (`lbz1...`).
+    pub blob_hash: BlobHash,
     /// Identifier of the transaction on the DA layer.
     pub da_transaction_id: T,
 }

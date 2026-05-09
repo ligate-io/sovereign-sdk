@@ -15,6 +15,7 @@ use sov_rollup_interface::common::{HexHash, SlotNumber};
 use sov_rollup_interface::da::RelevantBlobIters;
 use sov_rollup_interface::stf::BlobDiscardReason;
 use sov_rollup_interface::stf::DiscardedBlob;
+use sov_rollup_interface::BlobHash;
 use sov_sequencer_registry::AllowedSequencerError;
 use tracing::{debug, info, trace, warn};
 
@@ -309,7 +310,7 @@ impl<S: Spec> BlobStorage<S> {
         raw_blob_hash: [u8; 32],
         reason: BlobDiscardReason,
     ) {
-        let blob_hash = HexString(raw_blob_hash);
+        let blob_hash = BlobHash::new(raw_blob_hash);
         info!(
             %blob_hash,
             sender = %sender,

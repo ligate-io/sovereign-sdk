@@ -22,8 +22,30 @@ everything we do upstream.
 
 - `Sequencer::pending_tx_count()` for operator metrics. Open as upstream PR `Sovereign-Labs/sovereign-sdk#2838`. **Drop on rebase when that PR merges.**
 - Typed `BlobSubmissionError` variant on `BlobSubmissionStatus`. Open as `Sovereign-Labs/sovereign-sdk#2839`. **Drop on rebase when that merges.**
-- `LtxHash` / `LblkHash` / `LsrHash` bech32m hash types in `sov-rollup-interface`. `pub type TxHash = LtxHash` so partner-facing tx hashes display as `ltx1...` instead of `0x...`. **Permanent unless we land a `HashEncoding` hook upstream.** Tracking issue: Sovereign-Labs/sovereign-sdk#2837.
-- `NumberOrHash::Hash(TxHash)` in `sov-ledger-apis` so URL paths accept `ltx1...` (depends on the bech32m types). Permanent for the duration of the bech32m fork.
+- Bech32m hash types in `sov-rollup-interface`. Six concrete newtypes,
+  one per HRP, plus matching `pub type` aliases:
+
+  | Type alias | Newtype | HRP | What it identifies |
+  |---|---|---|---|
+  | `TxHash` | `LtxHash` | `ltx` | Rollup transaction hash |
+  | `BlockHash` | `LblkHash` | `lblk` | DA / slot block hash |
+  | `StateRootHash` | `LsrHash` | `lsr` | Rollup state root |
+  | `BatchHash` | `LbaHash` | `lba` | Sequencer batch hash |
+  | `ChainHash` | `LschHash` | `lsch` | Wallet schema commitment (`Runtime::CHAIN_HASH`) |
+  | `BlobHash` | `LbzHash` | `lbz` | DA blob hash |
+
+  Wired through `sov-ledger-apis` (`Slot`, `Batch`, `Transaction`),
+  `sov-rollup-apis` schema endpoint, `sov-blob-sender`,
+  `sov-db::ledger_db`, `sov-blob-storage` capabilities, plus the
+  celestia + mock-da adapters (`TmHash` / `MockHash` Display + FromStr,
+  `TmHashSchema` wallet attribute, `BlobWithSender.hash`).
+  `SubmitBlobReceipt.blob_hash` and `DiscardedBlob.hash` are typed as
+  `BlobHash`. `SchemaResponse.chain_hash` is typed as `ChainHash`.
+  **Permanent unless we land a `HashEncoding` hook upstream.** Tracking
+  issue: Sovereign-Labs/sovereign-sdk#2837.
+- `NumberOrHash::Hash(TxHash)` in `sov-ledger-apis` so URL paths accept
+  `ltx1...` (depends on the bech32m types). Permanent for the duration
+  of the bech32m fork.
 
 ## When upstream advances `dev`
 
@@ -32,13 +54,15 @@ everything we do upstream.
 3. `git rebase upstream/dev`
 4. Resolve any conflicts. Common spots:
    - `BlobSubmissionStatus` match arms in `sov-blob-sender/src/lib.rs` if Sovereign adds a new variant
-   - `TxHash` consumers if Sovereign refactors auth / capabilities
-   - `HexString` derives if upstream changes the universal-wallet macros
-5. `cargo check --workspace --exclude risc0 --exclude sp1` (set `LIBCLANG_PATH=/Library/Developer/CommandLineTools/usr/lib`, `PROTOC=$(which protoc)`, `SKIP_GUEST_BUILD=1` on macOS)
-6. `cargo test -p sov-rollup-interface --lib bech32m` (the bech32m hash tests should always pass)
+   - `TxHash`, `BlockHash`, `BatchHash`, `BlobHash` consumers if Sovereign refactors auth / capabilities / DA adapters
+   - `HexString` / `HexHash` callsites that we re-typed to one of the bech32m aliases
+   - `MockHash` / `TmHash` `Display` / `FromStr` if upstream rewrites the adapter type modules
+   - `TmHashSchema` `#[sov_wallet]` attribute if upstream changes wallet-derive parsing
+5. `cargo check --workspace --exclude risc0 --exclude sp1 --exclude sov-eip712-auth` (set `LIBCLANG_PATH=/Library/Developer/CommandLineTools/usr/lib`, `PROTOC=$(which protoc)`, `SKIP_GUEST_BUILD=1` on macOS; `sov-eip712-auth` has a pre-existing upstream feature-unification break that's unrelated to our patches)
+6. `cargo test -p sov-rollup-interface --lib bech32m` (all six HRP round-trips should pass)
 7. `git push --force-with-lease origin ligate-mainline`
 8. Bump the `rev` in `ligate-chain/Cargo.toml`'s `[patch.<sov-url>]` block to the new tip
-9. Boot the chain's localnet smoke: submit a transfer, confirm `ltx1...` tx hashes still flow
+9. Boot the chain's localnet smoke: submit a transfer, confirm `ltx1...` tx hashes still flow, slot lookups still surface `lblk1...` / `lsr1...`
 
 ## When you write a new patch
 

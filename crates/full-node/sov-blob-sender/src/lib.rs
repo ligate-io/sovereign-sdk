@@ -15,8 +15,8 @@ use in_flight_blob::{InFlightBlob, InFlightBlobInfo, InFlightBlobsCount};
 use metrics::{submit_blobs_enter_scope_marker, submit_blobs_exit_scope_marker};
 use sov_db::ledger_db::LedgerDb;
 use sov_modules_api::{DaSpec, EventModuleName, RuntimeEventResponse};
-use sov_rollup_interface::common::HexHash;
 use sov_rollup_interface::node::da::{DaService, SubmitBlobReceipt};
+use sov_rollup_interface::BlobHash;
 use sov_rollup_interface::node::ledger_api::{LedgerStateProvider, QueryMode};
 use sov_rollup_interface::node::{future_or_shutdown, FutureOrShutdownOutput};
 use sov_rollup_interface::stf::BlobDiscardReason;
@@ -443,7 +443,7 @@ type BlobReceiptFut<Da> = oneshot::Receiver<
 pub trait FinalizationManager: Clone + Send + Sync + 'static {
     async fn blob_finalized_or_discarded(
         &self,
-        blob_hash: HexHash,
+        blob_hash: BlobHash,
         blob_id: BlobInternalId,
     ) -> anyhow::Result<Option<(bool, BlobSelectorStatus)>>;
 }
@@ -452,7 +452,7 @@ pub trait FinalizationManager: Clone + Send + Sync + 'static {
 impl FinalizationManager for LedgerDb {
     async fn blob_finalized_or_discarded(
         &self,
-        blob_hash: HexHash,
+        blob_hash: BlobHash,
         _blob_id: BlobInternalId,
     ) -> anyhow::Result<Option<(bool, BlobSelectorStatus)>> {
         let (slot_number, status) = match self
@@ -540,7 +540,7 @@ impl<Da: DaService, FM: FinalizationManager> TaskState<Da, FM> {
 
     async fn get_blob_finalized_or_discarded(
         &self,
-        blob_hash: HexHash,
+        blob_hash: BlobHash,
         blob_id: BlobInternalId,
         state: &BlobExecutionStatus<Da::Spec>,
     ) -> anyhow::Result<Option<(bool, BlobSelectorStatus)>> {
@@ -565,7 +565,7 @@ impl<Da: DaService, FM: FinalizationManager> TaskState<Da, FM> {
     async fn check_timeout(
         &self,
         start_time: SystemTime,
-        blob_hash: HexHash,
+        blob_hash: BlobHash,
         da_tx_id: &<<Da as DaService>::Spec as DaSpec>::TransactionId,
     ) -> bool {
         let elapsed = match start_time.elapsed() {

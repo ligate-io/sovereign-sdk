@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sov_universal_wallet::schema::UniversalWallet;
 
-use crate::common::{LtxHash, SlotNumber};
+use crate::common::{LbaHash, LblkHash, LbzHash, LschHash, LsrHash, LtxHash, SlotNumber};
 
 pub mod optimistic;
 pub mod storage;
@@ -20,6 +20,24 @@ pub mod storage;
 /// A rollup transaction hash. Bech32m-encoded with HRP `ltx`
 /// (`ltx1...`); borsh layout is the raw 32-byte array.
 pub type TxHash = LtxHash;
+
+/// A DA block hash (slot hash on the rollup side). Bech32m with HRP
+/// `lblk` (`lblk1...`); 32 bytes.
+pub type BlockHash = LblkHash;
+
+/// A rollup state root. Bech32m with HRP `lsr` (`lsr1...`); 32 bytes,
+/// matching `<S::Storage as Storage>::Root`.
+pub type StateRootHash = LsrHash;
+
+/// A sequencer batch hash. Bech32m with HRP `lba` (`lba1...`).
+pub type BatchHash = LbaHash;
+
+/// Runtime / wallet schema commitment hash (`Runtime::CHAIN_HASH`).
+/// Bech32m with HRP `lsch` (`lsch1...`).
+pub type ChainHash = LschHash;
+
+/// DA-layer blob hash. Bech32m with HRP `lbz` (`lbz1...`).
+pub type BlobHash = LbzHash;
 
 /// Defines types and traits distinguishing between "native" (full node) and "zk" execution.
 ///

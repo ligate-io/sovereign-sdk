@@ -5,11 +5,11 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use sov_rollup_interface::common::HexHash;
 use sov_rollup_interface::da::{
     BlobReaderTrait, BlockHeaderTrait, DaSpec, RelevantBlobs, RelevantProofs, Time,
 };
 use sov_rollup_interface::node::da::{DaService, MaybeRetryable, SlotData, SubmitBlobReceipt};
+use sov_rollup_interface::BlobHash;
 use tokio::sync::{broadcast, oneshot, Mutex, RwLock};
 use tokio::time;
 
@@ -386,7 +386,7 @@ impl DaService for MockDaService {
         );
 
         let res = Ok(SubmitBlobReceipt {
-            blob_hash: HexHash::new(blob_hash.0),
+            blob_hash: BlobHash::new(blob_hash.0),
             da_transaction_id: blob_hash,
         });
 
@@ -414,7 +414,7 @@ impl DaService for MockDaService {
         self.aggregated_proof_sender.send(()).unwrap();
 
         let res = Ok(SubmitBlobReceipt {
-            blob_hash: HexHash::new(blob_hash.0),
+            blob_hash: BlobHash::new(blob_hash.0),
             da_transaction_id: blob_hash,
         });
 

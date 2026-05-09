@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use rockbound::cache::delta_reader::DeltaReader;
 use rockbound::{Schema, SchemaBatch};
 use serde::Serialize;
-use sov_rollup_interface::common::{HexHash, SlotNumber};
+use sov_rollup_interface::common::SlotNumber;
+use sov_rollup_interface::BlobHash;
 use sov_rollup_interface::node::da::SlotData;
 use sov_rollup_interface::node::ledger_api::AggregatedProofResponse;
 use sov_rollup_interface::stf::{
@@ -680,7 +681,7 @@ impl LedgerDb {
     /// Gets the discarded blob (if any) corresponding to the given `blob_hash`.
     pub async fn get_discarded_blob_by_hash(
         &self,
-        blob_hash: HexHash,
+        blob_hash: BlobHash,
     ) -> anyhow::Result<Option<StoredDiscardedBlob>> {
         let db = self.db.read().expect(DB_LOCK_POISONED).clone();
         db.get_async::<DiscardedBlobByHash>(&blob_hash.0).await
@@ -689,7 +690,7 @@ impl LedgerDb {
     /// Gets the proof receipt (if any) corresponding to the given `hash`.
     pub async fn get_proof_receipt_by_hash(
         &self,
-        hash: HexHash,
+        hash: BlobHash,
     ) -> anyhow::Result<Option<(SlotNumber, SerializedPartialProofReceipt)>> {
         let db = self.db.read().expect(DB_LOCK_POISONED).clone();
         db.get_async::<ProofReceiptByHash>(&hash.0).await

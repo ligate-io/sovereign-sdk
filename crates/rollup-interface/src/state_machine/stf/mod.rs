@@ -28,7 +28,8 @@ pub use verifier::StateTransitionVerifier;
 
 use super::optimistic::Attestation;
 use crate::common::SlotNumber;
-use crate::common::{HexHash, RollupHeight};
+use crate::common::RollupHeight;
+use crate::BlobHash;
 use crate::da::{DaSpec, RelevantBlobIters};
 use crate::zk::aggregated_proof::{AggregatedProofPublicData, SerializedAggregatedProof};
 use crate::zk::StateTransitionPublicData;
@@ -305,8 +306,8 @@ pub enum BlobDiscardReason {
 /// The discarded blob.
 #[derive(Debug, Clone, Eq, PartialEq, BorshDeserialize, BorshSerialize)]
 pub struct DiscardedBlob {
-    /// The blob's hash
-    pub hash: HexHash,
+    /// The blob's hash. Bech32m with HRP `lbz` (`lbz1...`).
+    pub hash: BlobHash,
     /// Discard reason
     pub reason: BlobDiscardReason,
 }

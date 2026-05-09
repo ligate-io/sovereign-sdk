@@ -38,6 +38,21 @@ pub fn lsr_hrp() -> &'static str {
     "lsr"
 }
 
+/// HRP for sequencer batch hashes (`lba1...`).
+pub fn lba_hrp() -> &'static str {
+    "lba"
+}
+
+/// HRP for runtime/wallet schema commitment hashes (`lsch1...`).
+pub fn lsch_hrp() -> &'static str {
+    "lsch"
+}
+
+/// HRP for DA-layer blob hashes (`lbz1...`).
+pub fn lbz_hrp() -> &'static str {
+    "lbz"
+}
+
 // ---- Concrete types -------------------------------------------------------
 //
 // Each type is `pub struct $Name(pub [u8; N])` with the full set of
@@ -63,7 +78,10 @@ macro_rules! bech32m_hash_type {
             UniversalWallet,
         )]
         pub struct $name(
-            #[sov_wallet(display(bech32m(prefix = stringify!($hrp_fn))))]
+            // The wallet derive parses the prefix string as a Rust
+            // expression, so it has to spell the function call:
+            // `concat!("ltx_hrp", "()")` -> `"ltx_hrp()"`.
+            #[sov_wallet(display(bech32m(prefix = concat!(stringify!($hrp_fn), "()"))))]
             pub [u8; $bytes],
         );
 
@@ -234,9 +252,25 @@ bech32m_hash_type! {
 }
 
 bech32m_hash_type! {
-    /// State root. Bech32m-encoded with HRP `lsr` (`lsr1...`); 64 bytes
-    /// underneath because chain state roots are 64-byte hashes.
-    LsrHash, 64, lsr_hrp
+    /// State root. Bech32m-encoded with HRP `lsr` (`lsr1...`). 32 bytes,
+    /// matching `<S::Storage as Storage>::Root` in the runtime.
+    LsrHash, 32, lsr_hrp
+}
+
+bech32m_hash_type! {
+    /// Sequencer batch hash. Bech32m with HRP `lba` (`lba1...`).
+    LbaHash, 32, lba_hrp
+}
+
+bech32m_hash_type! {
+    /// Runtime / wallet schema commitment hash. Bech32m with HRP
+    /// `lsch` (`lsch1...`); matches `Runtime::CHAIN_HASH`.
+    LschHash, 32, lsch_hrp
+}
+
+bech32m_hash_type! {
+    /// DA-layer blob hash. Bech32m with HRP `lbz` (`lbz1...`).
+    LbzHash, 32, lbz_hrp
 }
 
 // ---- Cross-conversions with `HexString<[u8; N]>` -------------------------
@@ -248,25 +282,38 @@ bech32m_hash_type! {
 // preserve the underlying bytes; the only difference is which Display /
 // Serialize they go through.
 
-impl From<crate::common::HexString<[u8; 32]>> for LtxHash {
-    fn from(value: crate::common::HexString<[u8; 32]>) -> Self {
-        Self(value.0)
-    }
+macro_rules! impl_hexstring_cross_conv_32 {
+    ($t:ident) => {
+        impl From<crate::common::HexString<[u8; 32]>> for $t {
+            fn from(value: crate::common::HexString<[u8; 32]>) -> Self {
+                Self(value.0)
+            }
+        }
+
+        impl From<$t> for crate::common::HexString<[u8; 32]> {
+            fn from(value: $t) -> Self {
+                crate::common::HexString::new(value.0)
+            }
+        }
+
+        #[allow(deprecated)]
+        impl From<digest::generic_array::GenericArray<u8, digest::typenum::U32>> for $t {
+            #[allow(deprecated)]
+            fn from(
+                value: digest::generic_array::GenericArray<u8, digest::typenum::U32>,
+            ) -> Self {
+                Self(value.into())
+            }
+        }
+    };
 }
 
-impl From<LtxHash> for crate::common::HexString<[u8; 32]> {
-    fn from(value: LtxHash) -> Self {
-        crate::common::HexString::new(value.0)
-    }
-}
-
-#[allow(deprecated)]
-impl From<digest::generic_array::GenericArray<u8, digest::typenum::U32>> for LtxHash {
-    #[allow(deprecated)]
-    fn from(value: digest::generic_array::GenericArray<u8, digest::typenum::U32>) -> Self {
-        Self(value.into())
-    }
-}
+impl_hexstring_cross_conv_32!(LtxHash);
+impl_hexstring_cross_conv_32!(LblkHash);
+impl_hexstring_cross_conv_32!(LsrHash);
+impl_hexstring_cross_conv_32!(LbaHash);
+impl_hexstring_cross_conv_32!(LschHash);
+impl_hexstring_cross_conv_32!(LbzHash);
 
 #[cfg(test)]
 mod tests {
@@ -294,11 +341,41 @@ mod tests {
 
     #[test]
     fn lsr_round_trip() {
-        let bytes = [0xef; 64];
+        let bytes = [0xef; 32];
         let h = LsrHash::new(bytes);
         let s = h.to_string();
         assert!(s.starts_with("lsr1"), "got {s}");
         let parsed: LsrHash = s.parse().unwrap();
+        assert_eq!(parsed, h);
+    }
+
+    #[test]
+    fn lba_round_trip() {
+        let bytes = [0x12; 32];
+        let h = LbaHash::new(bytes);
+        let s = h.to_string();
+        assert!(s.starts_with("lba1"), "got {s}");
+        let parsed: LbaHash = s.parse().unwrap();
+        assert_eq!(parsed, h);
+    }
+
+    #[test]
+    fn lsch_round_trip() {
+        let bytes = [0x34; 32];
+        let h = LschHash::new(bytes);
+        let s = h.to_string();
+        assert!(s.starts_with("lsch1"), "got {s}");
+        let parsed: LschHash = s.parse().unwrap();
+        assert_eq!(parsed, h);
+    }
+
+    #[test]
+    fn lbz_round_trip() {
+        let bytes = [0x56; 32];
+        let h = LbzHash::new(bytes);
+        let s = h.to_string();
+        assert!(s.starts_with("lbz1"), "got {s}");
+        let parsed: LbzHash = s.parse().unwrap();
         assert_eq!(parsed, h);
     }
 

@@ -26,8 +26,8 @@ use sov_rest_utils::{
     json_obj, preconfigured_router_layers, serve_generic_ws_subscription, ApiResult, ErrorObject,
     PageSelection, Pagination, Path, Query,
 };
-use sov_rollup_interface::common::{HexHash, HexString, SlotNumber};
-use sov_rollup_interface::TxHash;
+use sov_rollup_interface::common::SlotNumber;
+use sov_rollup_interface::{BatchHash, BlockHash, StateRootHash, TxHash};
 use sov_rollup_interface::node::ledger_api::{
     AggregatedProofResponse, BatchIdAndOffset, BatchIdentifier, BatchResponse, EventIdentifier,
     FinalityStatus, IncludeChildren, ItemOrHash, LedgerStateProvider, QueryMode, SlotIdAndOffset,
@@ -970,8 +970,8 @@ impl NumberOrHash {
 )]
 struct Slot<B, TxReceipt: TxReceiptContents, E> {
     pub number: u64,
-    pub hash: HexHash,
-    pub state_root: HexString,
+    pub hash: BlockHash,
+    pub state_root: StateRootHash,
     pub batch_range: Range<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batches: Option<Vec<Batch<B, TxReceipt, E>>>,
@@ -1002,10 +1002,17 @@ impl<B, TxReceipt: TxReceiptContents, E> Slot<B, TxReceipt, E> {
             None => None,
         };
 
+        // Runtime invariant: `<S::Storage as Storage>::Root` is `[u8; 32]`.
+        // Any other length is a node-level bug, surface it loudly.
+        let state_root: [u8; 32] = slot
+            .state_root
+            .as_slice()
+            .try_into()
+            .expect("state root must be 32 bytes");
         Self {
             number: slot.number,
-            hash: HexHash::new(slot.hash),
-            state_root: HexString(slot.state_root),
+            hash: BlockHash::new(slot.hash),
+            state_root: StateRootHash::new(state_root),
             batch_range: slot.batch_range,
             batches,
             finality_status: slot.finality_status,
@@ -1022,7 +1029,7 @@ impl<B, TxReceipt: TxReceiptContents, E> Slot<B, TxReceipt, E> {
 )]
 struct Batch<B, TxReceipt: TxReceiptContents, E> {
     pub number: u64,
-    pub hash: HexHash,
+    pub hash: BatchHash,
     pub tx_range: Range<u64>,
     pub receipt: B,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1054,7 +1061,7 @@ impl<B, TxReceipt: TxReceiptContents, E> Batch<B, TxReceipt, E> {
         };
         Self {
             number,
-            hash: HexHash::new(batch.hash),
+            hash: BatchHash::new(batch.hash),
             tx_range: batch.tx_range,
             receipt: batch.receipt,
             txs,
@@ -1071,7 +1078,7 @@ impl<B, TxReceipt: TxReceiptContents, E> Batch<B, TxReceipt, E> {
 )]
 struct Transaction<TxReceipt: TxReceiptContents, E> {
     pub number: u64,
-    pub hash: HexHash,
+    pub hash: TxHash,
     pub event_range: Range<u64>,
     pub body: FullyBakedTx,
     pub receipt: TxEffect<TxReceipt>,
@@ -1084,7 +1091,7 @@ impl<TxReceipt: TxReceiptContents, E> Transaction<TxReceipt, E> {
     fn new(tx: TxResponse<TxReceipt, RuntimeEventResponse<E>>, number: u64) -> Self {
         Self {
             number,
-            hash: HexHash::new(tx.hash),
+            hash: TxHash::new(tx.hash),
             event_range: tx.event_range,
             body: tx.body.unwrap_or_default(),
             receipt: tx.receipt.into(),
@@ -1119,9 +1126,8 @@ mod tests {
     #[test]
     fn number_or_hash_to_string() {
         assert_eq!(NumberOrHash::Number(0).to_string(), "0");
-        assert_eq!(
-            NumberOrHash::Hash(HexHash::new([0; 32])).to_string(),
-            "0x0000000000000000000000000000000000000000000000000000000000000000",
-        );
+        // `Hash` carries `TxHash` (= `LtxHash`), so Display emits `ltx1...`.
+        let hash_str = NumberOrHash::Hash(TxHash::new([0; 32])).to_string();
+        assert!(hash_str.starts_with("ltx1"), "got {hash_str}");
     }
 }

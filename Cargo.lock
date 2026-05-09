@@ -12689,6 +12689,7 @@ dependencies = [
  "arbitrary",
  "async-trait",
  "backon",
+ "bech32",
  "bincode",
  "borsh",
  "bytes",

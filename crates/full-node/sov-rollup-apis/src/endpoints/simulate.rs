@@ -149,7 +149,10 @@ impl From<SimulateError> for ErrorObject {
     }
 }
 
-const NULL_TX_HASH: HexHash = HexString([0; 32]);
+// Constructed via the const `Bech32mEncoded::new` ctor since Rust doesn't
+// allow tuple-struct literal syntax with PhantomData in const context.
+const NULL_TX_HASH: sov_modules_api::TxHash =
+    sov_modules_api::TxHash::new([0; 32]);
 
 /// Sequencer configuration for transaction simulation.
 ///

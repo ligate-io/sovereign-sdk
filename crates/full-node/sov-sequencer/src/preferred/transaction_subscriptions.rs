@@ -476,7 +476,7 @@ impl<S: Spec, Rt: Runtime<S>> AcceptedTxStream<S, Rt> {
                     });
                 ApiAcceptedTx {
                     tx: tx_body,
-                    id: HexString(tx.hash),
+                    id: sov_modules_api::TxHash::new(tx.hash),
                     confirmation: Confirmation {
                         events: tx
                             .events
@@ -617,7 +617,7 @@ mod tests {
     fn build_mock_confirmation(tx_number: u64) -> AcceptedTx<Confirmation<S, TestRuntime<S>>> {
         AcceptedTx {
             tx: FullyBakedTx::new(vec![]),
-            tx_hash: HexString([tx_number as u8; 32]),
+            tx_hash: sov_modules_api::TxHash::new([tx_number as u8; 32]),
             confirmation: Confirmation {
                 events: vec![],
                 receipt: ApiTxEffect::Successful {
@@ -831,7 +831,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(next_tx.confirmation.tx_number, i);
-            assert_eq!(next_tx.id, HexString([i as u8; 32]));
+            assert_eq!(next_tx.id, sov_modules_api::TxHash::new([i as u8; 32]));
         }
 
         // Push a new tx to the stream and check that it comes through

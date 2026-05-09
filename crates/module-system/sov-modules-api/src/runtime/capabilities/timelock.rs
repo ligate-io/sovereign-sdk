@@ -8,14 +8,17 @@ use serde::{Deserialize, Serialize};
 
 use super::{calculate_hash, calculate_hash_metered};
 use crate::{
-    err_detail, Error, ErrorContext, ErrorDetail, GasMeter, GasMeteringError, HexHash, HexString,
-    ModuleId, Spec, TxState,
+    err_detail, Error, ErrorContext, ErrorDetail, GasMeter, GasMeteringError, HexString, ModuleId,
+    Spec, TxState, TxHash,
 };
 
 /// Identifier for a timelock proposal.
 ///
 /// This is the hash of an encoded runtime call message, not the hash of a raw transaction.
-pub type ProposalId = HexHash;
+/// Aliased to [`TxHash`] (the chain's bech32m-encoded 32-byte hash type)
+/// since both share the underlying byte representation produced by
+/// [`calculate_hash`].
+pub type ProposalId = TxHash;
 
 /// Default number of seconds after unlock during which a proposal may be executed.
 pub const DEFAULT_EXPIRE_SECONDS_AFTER_UNLOCK: u64 = 86_400 * 2; // 2 days

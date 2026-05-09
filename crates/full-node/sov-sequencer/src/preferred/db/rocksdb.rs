@@ -332,7 +332,7 @@ mod tests {
         let mut tx_hashes = vec![];
         for i in 0..10 {
             let tx = FullyBakedTx::new(vec![i as u8; 200]);
-            let tx_hash = HexString([i as u8; 32]);
+            let tx_hash = sov_modules_api::TxHash::new([i as u8; 32]);
             txs.push(tx);
             tx_hashes.push(tx_hash);
         }
@@ -392,7 +392,7 @@ mod tests {
                 data: vec![42].into(),
                 sequencing_data: sequencing_data.clone(),
             },
-            HexString([1; 32]),
+            sov_modules_api::TxHash::new([1; 32]),
         )
         .await
         .unwrap();

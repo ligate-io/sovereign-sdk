@@ -9,7 +9,7 @@ use futures::{Stream, StreamExt};
 use sov_mock_da::storable::StorableMockDaService;
 use sov_modules_api::capabilities::config_chain_id;
 use sov_modules_api::transaction::TxDetails;
-use sov_modules_api::{CryptoSpec, HexHash, Runtime, Spec};
+use sov_modules_api::{CryptoSpec, HexHash, Runtime, Spec, TxHash};
 use sov_node_client::NodeClient;
 use sov_rollup_interface::node::ledger_api::IncludeChildren;
 use sov_test_utils::ledger_db::sov_api_spec::types::{Slot, TxReceiptResult};
@@ -34,7 +34,7 @@ pub struct BatchSender {
     /// The generation numbers used to send transactions
     generation_numbers: HashMap<<<S as Spec>::CryptoSpec as CryptoSpec>::PublicKey, u64>,
     /// Channel used to send transactions to wait for the receiver task
-    tx_sender: Sender<HashSet<HexHash>>,
+    tx_sender: Sender<HashSet<TxHash>>,
     /// The client used to send transactions to the sequencer
     client: NodeClient,
 }
@@ -45,7 +45,7 @@ pub struct BatchReceiver {
     /// The name of the benchmark to execute
     bench_name: String,
     /// A list of transactions sent we are waiting for inclusion on DA
-    txs_to_wait_for: HashSet<HexHash>,
+    txs_to_wait_for: HashSet<TxHash>,
     /// The highest slot to prove
     highest_slot_to_prove: u64,
     /// The highest slot number proven so far.
@@ -53,7 +53,7 @@ pub struct BatchReceiver {
     /// Timestamp of the last proof received
     last_proof_stamp: Instant,
     /// Channel used to receive transactions to wait for to the sender task
-    tx_channel: Receiver<HashSet<HexHash>>,
+    tx_channel: Receiver<HashSet<TxHash>>,
     /// For now we use a slot subscription until we can reliably receive [`TxStatus::Processed`] from the full-node
     slots_subscription: Pin<Box<dyn Stream<Item = Result<Slot, anyhow::Error>> + Send>>,
     /// We use a proof subscription to know how far we have generated proofs
@@ -69,7 +69,7 @@ impl BatchReceiver {
     pub async fn new(
         bench_name: String,
         client: NodeClient,
-        tx_channel: Receiver<HashSet<HexHash>>,
+        tx_channel: Receiver<HashSet<TxHash>>,
         da_service: &Arc<StorableMockDaService>,
     ) -> Self {
         Self {
@@ -128,7 +128,7 @@ impl BatchReceiver {
 
                         for batch in next_slot.batches {
                             for tx in batch.txs {
-                                let parsed_hash: HexHash =
+                                let parsed_hash: TxHash =
                                     tx.hash.parse().map_err(
                                         |e| {
                                             tracing::error!(bench = self.bench_name, hash = ?tx.hash, err = ?e, "An error occurred while parsing the tx hash");
@@ -206,7 +206,7 @@ impl BatchSender {
     pub async fn new(
         bench_name: String,
         client: NodeClient,
-        tx_sender: Sender<HashSet<HexHash>>,
+        tx_sender: Sender<HashSet<TxHash>>,
     ) -> Self {
         Self {
             bench_name,

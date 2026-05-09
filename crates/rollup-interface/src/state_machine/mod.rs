@@ -12,13 +12,14 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sov_universal_wallet::schema::UniversalWallet;
 
-use crate::common::{HexHash, SlotNumber};
+use crate::common::{LtxHash, SlotNumber};
 
 pub mod optimistic;
 pub mod storage;
 
-/// A rollup transaction hash.
-pub type TxHash = HexHash;
+/// A rollup transaction hash. Bech32m-encoded with HRP `ltx`
+/// (`ltx1...`); borsh layout is the raw 32-byte array.
+pub type TxHash = LtxHash;
 
 /// Defines types and traits distinguishing between "native" (full node) and "zk" execution.
 ///

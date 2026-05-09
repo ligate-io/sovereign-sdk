@@ -157,7 +157,7 @@ impl TestState {
 
         let wait_to = head_slot + config_deferred_slots_count() + 5;
         tracing::info!(current_head_slot = head_slot, wait_max_till_slot= %wait_to, "Start gathering all statuses");
-        let mut last_tx_statuses: Vec<(HexHash, TxStatus)> =
+        let mut last_tx_statuses: Vec<(TxHash, TxStatus)> =
             Vec::with_capacity(self.txs_to_wait.len());
 
         let mut slots = 0;
@@ -321,7 +321,7 @@ async fn test_stream_of_transactions(
                 accept_tx_response
             );
 
-            let tx_hash = HexHash::from_str(&accept_tx_response.id)?;
+            let tx_hash = TxHash::from_str(&accept_tx_response.id)?;
             harness.add_tx_to_wait(tx_hash);
         }
         tracing::info!("Set of transactions sent, waiting for finalized header");

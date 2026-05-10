@@ -29,7 +29,11 @@ use sov_rollup_interface::storage::HierarchicalStorageManager;
 use sov_rollup_interface::ProvableHeightTracker;
 use sov_sequencer::preferred::PreferredSequencer;
 use sov_sequencer::standard::StdSequencer;
-use sov_sequencer::{ProofBlobSender, Sequencer, SequencerApis, SequencerKindConfig};
+use sov_sequencer::{
+    BlobExecutionStatus, MempoolMetrics, ProofBlobSender, Sequencer, SequencerApis,
+    SequencerKindConfig,
+};
+use tokio::sync::broadcast;
 use sov_state::storage::NativeStorage;
 use sov_state::Storage;
 use sov_stf_runner::processes::{
@@ -258,11 +262,15 @@ pub trait FullNodeBlueprint<M: ExecutionMode>: RollupBlueprint<M> {
                     SequencerApis::rest_api_server(sequencer.clone(), shutdown_receiver),
                 );
 
+                let mempool_metrics: Arc<dyn MempoolMetrics> = Arc::new(sequencer.clone());
+                let blob_status_channel = sequencer.blob_status_channel();
                 Ok(SequencerCreationReceipt {
                     api_state: sequencer.api_state(),
                     endpoints,
                     background_handles,
                     proof_sender: Arc::new(sequencer),
+                    mempool_metrics,
+                    blob_status_channel,
                     api_ledger_db: api_ledger_db.clone(),
                     da_address,
                 })
@@ -300,11 +308,15 @@ pub trait FullNodeBlueprint<M: ExecutionMode>: RollupBlueprint<M> {
                     SequencerApis::rest_api_server(sequencer.clone(), shutdown_receiver),
                 );
 
+                let mempool_metrics: Arc<dyn MempoolMetrics> = Arc::new(sequencer.clone());
+                let blob_status_channel = sequencer.blob_status_channel();
                 Ok(SequencerCreationReceipt {
                     api_state: sequencer.api_state(),
                     endpoints,
                     background_handles,
                     proof_sender: Arc::new(sequencer),
+                    mempool_metrics,
+                    blob_status_channel,
                     api_ledger_db: api_ledger_db.clone(),
                     da_address,
                 })
@@ -830,6 +842,17 @@ pub struct SequencerCreationReceipt<S: Spec> {
     ///
     /// See [`crate::proof_sender::SovApiProofSender::new`].
     pub proof_sender: Arc<dyn ProofBlobSender>,
+    /// Object-safe view over the sequencer's mempool. Lets node-side
+    /// observability (e.g. Prometheus metrics) read `pending_tx_count`
+    /// without taking on the full [`Sequencer`] trait.
+    pub mempool_metrics: Arc<dyn MempoolMetrics>,
+    /// Cloneable broadcast channel of every blob execution status
+    /// transition produced by the internal `BlobSender`. Subscribers
+    /// (`broadcast::Receiver`) see Submitted -> Published -> Processed
+    /// -> Finalized plus `Failed { error, will_retry }`. Used by
+    /// node-side metrics to derive DA submission latency and
+    /// failure-by-reason counters.
+    pub blob_status_channel: broadcast::Sender<BlobExecutionStatus<S::Da>>,
     /// The API LedgerDb that the sequencer will update for REST API consistency
     pub api_ledger_db: LedgerDb,
     #[allow(missing_docs)]

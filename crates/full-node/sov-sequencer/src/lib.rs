@@ -23,6 +23,10 @@ pub use common::{react_to_state_updates, AcceptTxErrorCode, AcceptTxErrorDetails
 pub use config::{SeqConfigExtension, SequencerConfig, SequencerKindConfig, SovRateLimiterConfig};
 pub use preferred::SequencerRole;
 pub use rest_api::SequencerApis;
+// Re-exported so downstream crates (notably `sov-modules-rollup-blueprint`,
+// which threads it through `SequencerCreationReceipt`) don't need to take
+// a direct dep on `sov-blob-sender` just for one type.
+pub use sov_blob_sender::BlobExecutionStatus;
 use serde::Serialize;
 use sov_modules_api::capabilities::RollupHeight;
 use sov_rollup_interface::common::SlotNumber;
@@ -98,4 +102,26 @@ pub trait ProofBlobSender: Send + Sync + 'static {
     /// of in-flight proof blobs against the configured
     /// `max_concurrent_proof_blobs` cap.
     async fn proof_blob_sender_status(&self) -> anyhow::Result<BlobSenderStatus>;
+}
+
+/// Object-safe view over the sequencer's mempool surface, designed to
+/// be plumbed through `SequencerCreationReceipt` so node-side code
+/// (Prometheus metrics, dashboards) can observe `pending_tx_count`
+/// without taking on the full [`Sequencer`] trait's associated types.
+///
+/// Concrete sequencers in this crate (`StdSequencer`,
+/// `PreferredSequencer`) implement [`Sequencer`], so the blanket impl
+/// below picks them up automatically.
+#[async_trait]
+pub trait MempoolMetrics: Send + Sync + 'static {
+    /// Number of transactions currently sitting in the mempool. See
+    /// [`Sequencer::pending_tx_count`].
+    async fn pending_tx_count(&self) -> usize;
+}
+
+#[async_trait]
+impl<T: Sequencer> MempoolMetrics for T {
+    async fn pending_tx_count(&self) -> usize {
+        <Self as Sequencer>::pending_tx_count(self).await
+    }
 }

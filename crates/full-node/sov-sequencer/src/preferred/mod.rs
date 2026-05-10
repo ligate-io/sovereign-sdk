@@ -181,6 +181,20 @@ where
             .map_err(|e| e.into_state_update_error())
     }
 
+    /// Cloneable [`broadcast::Sender`] feeding every blob execution
+    /// status transition produced by the internal `BlobSender`.
+    /// Mirrors the getter on `StdSequencer`. The underlying field is
+    /// `Option<...>` for legacy reasons; in practice the channel is
+    /// always constructed during initialization, so this getter
+    /// unwraps. Used by node-side observability hooks (Prometheus
+    /// metrics).
+    pub fn blob_status_channel(&self) -> broadcast::Sender<BlobExecutionStatus<Da::Spec>> {
+        self.0
+            .blobs_sender_channel
+            .clone()
+            .expect("preferred sequencer always constructs the blob_status broadcast channel")
+    }
+
     /// Returns a range to allow hysteresis during catchup. The first (lower) value will be the
     /// minimum to be considered successfully recovered, the second (upper) value will be the
     /// target.

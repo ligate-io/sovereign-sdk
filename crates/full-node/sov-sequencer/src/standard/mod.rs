@@ -15,7 +15,7 @@ use crate::{
 use anyhow::Context;
 use async_trait::async_trait;
 use axum::http::StatusCode;
-use sov_blob_sender::{new_blob_id, BlobSender};
+use sov_blob_sender::{new_blob_id, BlobExecutionStatus, BlobSender};
 use sov_db::ledger_db::LedgerDb;
 pub use sov_full_node_configs::sequencer::StdSequencerConfig;
 use sov_metrics::{AuthAndProcessMetrics, AuthAndProcessTimings};
@@ -40,7 +40,7 @@ use std::path::Path;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tracing::{debug, trace, warn};
@@ -100,6 +100,12 @@ where
     da_address: <S::Da as DaSpec>::Address,
     config: SequencerConfig<S::Address, StdSequencerConfig>,
     api_ledger_db: LedgerDb,
+    /// Broadcast channel of blob execution status updates from the
+    /// internal `BlobSender`. Held here so node-side observers (e.g.
+    /// Prometheus metrics) can `subscribe()` without owning the
+    /// sequencer's internal types. Mirrors the channel that
+    /// `PreferredSequencer` already plumbs through its config.
+    blob_status_channel: broadcast::Sender<BlobExecutionStatus<Da::Spec>>,
 }
 
 /// An error that indicates that the transaction could not be added to the batch.
@@ -164,6 +170,10 @@ where
 
         let nb_of_concurrent_batch_blob_submissions = Arc::new(AtomicUsize::new(0));
         let nb_of_concurrent_proof_blob_submissions = Arc::new(AtomicUsize::new(0));
+        // 1024 capacity is generous for an observability channel.
+        // Lagging subscribers see `RecvError::Lagged` and can resync;
+        // the BlobSender does not block on send.
+        let (blob_status_channel, _) = broadcast::channel(1024);
         let (blob_sender, blob_sender_handle) = BlobSender::new(
             da,
             ledger_db.clone(),
@@ -171,7 +181,7 @@ where
             TxStatusBlobSenderHooks::new(txsm.clone()),
             shutdown_sender,
             Duration::from_secs(config.blob_processing_timeout_secs),
-            None,
+            Some(blob_status_channel.clone()),
             Default::default(),
             nb_of_concurrent_batch_blob_submissions,
             nb_of_concurrent_proof_blob_submissions,
@@ -204,6 +214,7 @@ where
             config: config.clone(),
             api_ledger_db,
             da_address,
+            blob_status_channel,
         }));
 
         handles.push(tokio::spawn({
@@ -618,6 +629,16 @@ where
             tx_hash,
             confirmation: EmptyConfirmation {},
         })
+    }
+
+    /// Cloneable [`broadcast::Sender`] feeding every blob execution
+    /// status transition produced by the internal `BlobSender`.
+    /// Subscribers (`broadcast::Receiver`) see Submitted -> Published
+    /// -> Processed -> Finalized, plus `Failed { error, will_retry }`.
+    /// Used by node-side observability hooks (Prometheus metrics) to
+    /// derive DA submission latency / failure-by-reason counters.
+    pub fn blob_status_channel(&self) -> broadcast::Sender<BlobExecutionStatus<Da::Spec>> {
+        self.0.blob_status_channel.clone()
     }
 }
 

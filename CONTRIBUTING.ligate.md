@@ -46,6 +46,16 @@ everything we do upstream.
 - `NumberOrHash::Hash(TxHash)` in `sov-ledger-apis` so URL paths accept
   `ltx1...` (depends on the bech32m types). Permanent for the duration
   of the bech32m fork.
+- `MempoolMetrics` trait + `blob_status_channel` exposure on
+  `SequencerCreationReceipt` (`sov-sequencer`,
+  `sov-modules-rollup-blueprint`). Lets node-side observability
+  (Prometheus metrics, dashboards) read `pending_tx_count` and
+  subscribe to blob execution status updates without owning the
+  full `Sequencer` trait. `StdSequencer` now constructs a broadcast
+  channel and plumbs `Some(channel)` into `BlobSender::new`, mirroring
+  what `PreferredSequencer` already does. **Upstreamable** if Sovereign
+  is interested; filed as the precondition for our metrics issue
+  `ligate-io/ligate-chain#164`. Drop on rebase if upstream PR merges.
 
 ## When upstream advances `dev`
 

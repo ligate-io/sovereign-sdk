@@ -10,10 +10,10 @@ use sov_mock_da::storable::layer::StorableMockDaLayer;
 use sov_mock_da::storable::StorableMockDaService;
 use sov_mock_da::{MockAddress, MockDaSpec};
 use sov_modules_api::da::BlockHeaderTrait;
-use sov_modules_api::HexHash;
 use sov_rollup_interface::da::BlobReaderTrait;
 use sov_rollup_interface::node::da::DaService;
 use sov_rollup_interface::stf::BlobDiscardReason;
+use sov_rollup_interface::BlobHash;
 use sov_test_utils::logging::LogCollector;
 use std::sync::atomic::AtomicUsize;
 use tempfile::TempDir;
@@ -64,7 +64,7 @@ where
 {
     async fn blob_finalized_or_discarded(
         &self,
-        _blob_hash: HexHash,
+        _blob_hash: BlobHash,
         blob_id: BlobInternalId,
     ) -> anyhow::Result<Option<(bool, BlobSelectorStatus)>> {
         let last_finalized_block_number = self.da.get_last_finalized_block_number().await?;

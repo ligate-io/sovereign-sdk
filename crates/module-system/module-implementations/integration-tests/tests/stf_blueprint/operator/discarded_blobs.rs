@@ -2,8 +2,8 @@ use std::env;
 
 use sov_mock_da::MockBlob;
 use sov_modules_api::BlobReaderTrait;
-use sov_rollup_interface::common::HexString;
 use sov_rollup_interface::da::RelevantBlobs;
+use sov_rollup_interface::BlobHash;
 use sov_test_utils::{TestUser, TEST_DEFAULT_USER_BALANCE};
 
 use crate::stf_blueprint::operator::operator_rt::{setup, IntegTestRuntime};
@@ -42,6 +42,6 @@ fn invalid_blobs_are_discarded() {
     let (result, _) = runner.execute::<RelevantBlobs<MockBlob>>(blobs);
 
     // Check that the blob was discarded
-    assert_eq!(result.discarded_blobs[0].hash, HexString(mock_blob_hash.0));
+    assert_eq!(result.discarded_blobs[0].hash, BlobHash::new(mock_blob_hash.0));
     assert!(result.batch_receipts.is_empty());
 }

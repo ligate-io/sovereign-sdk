@@ -7,10 +7,11 @@ use sov_db::{
 };
 use sov_mock_da::{MockAddress, MockBlob, MockBlock, MockDaSpec, MockHash};
 use sov_mock_zkvm::MockZkvmHost;
-use sov_rollup_interface::common::{HexHash, IntoSlotNumber, SlotNumber};
+use sov_rollup_interface::common::{IntoSlotNumber, SlotNumber};
 use sov_rollup_interface::node::ledger_api::{LedgerStateProvider, SlotIdentifier};
 use sov_rollup_interface::stf::{BatchReceipt, BlobDiscardReason, TransactionReceipt, TxEffect};
 use sov_rollup_interface::stf::{DiscardedBlob, StoredEvent};
+use sov_rollup_interface::BlobHash;
 use sov_rollup_interface::zk::aggregated_proof::{
     AggregatedProofPublicData, CodeCommitmentHash, SerializedAggregatedProof,
 };
@@ -532,7 +533,7 @@ fn create_slot_schema_batch(slot_num: u64, ledger_db: &LedgerDb) -> SchemaBatch 
 
     for i in 0..3 {
         let discarded_blob = DiscardedBlob {
-            hash: HexHash::new([(slot_num + i) as u8; 32]),
+            hash: BlobHash::new([(slot_num + i) as u8; 32]),
             reason: BlobDiscardReason::OutOfCapacity,
         };
         discarded_blobs.push(discarded_blob);

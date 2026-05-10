@@ -14,7 +14,7 @@ use celestia_types::namespace_data::NamespaceData;
 use celestia_types::nmt::Namespace;
 use rand::{RngCore, SeedableRng};
 use sov_metrics::MonitoringConfig;
-use sov_rollup_interface::common::HexHash;
+use sov_rollup_interface::BlobHash;
 use sov_rollup_interface::da::{BlobReaderTrait, BlockHeaderTrait, DaVerifier, RelevantBlobs};
 use sov_rollup_interface::node::da::DaService;
 use sov_rollup_interface::node::da::SlotData;
@@ -53,7 +53,7 @@ async fn collect_all_blobs_between(
 fn assert_single_blob(
     mut blobs: Vec<BlobWithSender>,
     expected_signer: CelestiaAddress,
-    expected_hash: HexHash,
+    expected_hash: BlobHash,
     expected_data: &[u8],
 ) {
     assert_eq!(blobs.len(), 1);
@@ -82,7 +82,7 @@ impl SubmissionKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct BlobRecord {
     sender: CelestiaAddress,
-    hash: HexHash,
+    hash: BlobHash,
     payload: Vec<u8>,
 }
 
@@ -197,7 +197,7 @@ async fn execute_phase(
     services: &[CelestiaService],
     namespace_records: &mut [NamespaceRecords],
 ) -> anyhow::Result<()> {
-    let mut join_set: JoinSet<anyhow::Result<(PhaseCommand, HexHash)>> = JoinSet::new();
+    let mut join_set: JoinSet<anyhow::Result<(PhaseCommand, BlobHash)>> = JoinSet::new();
     for command in commands {
         let service = services[command.namespace_idx].clone();
         join_set.spawn(async move {
@@ -673,13 +673,13 @@ async fn test_raw_v0_and_v1_blobs_across_namespaces() -> anyhow::Result<()> {
                 if *ns == NS_BATCH {
                     batch_records.push(BlobRecord {
                         sender: *signer,
-                        hash: HexHash::new(*v1_blob.commitment.hash()),
+                        hash: BlobHash::new(*v1_blob.commitment.hash()),
                         payload: data_b,
                     });
                 } else if *ns == NS_PROOF {
                     proof_records.push(BlobRecord {
                         sender: *signer,
-                        hash: HexHash::new(*v1_blob.commitment.hash()),
+                        hash: BlobHash::new(*v1_blob.commitment.hash()),
                         payload: data_b,
                     });
                 }

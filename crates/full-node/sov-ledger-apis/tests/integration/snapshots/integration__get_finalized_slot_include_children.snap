@@ -9,7 +9,7 @@ expression: "&slot"
   },
   "batches": [
     {
-      "hash": "0xafd7994f4e6225d0ba9063db9000a6a194e0f0dbbfb90ed0c47fe3e23571770e",
+      "hash": "lba14ltejn6wvgjapw5sv0deqq9x5x2wpuxmh7usa5xy0l37ydt3wu8qmqn4wv",
       "number": 0,
       "receipt": 0.0,
       "slot_number": 0,
@@ -34,7 +34,7 @@ expression: "&slot"
                 "name": "Bank"
               },
               "number": 0,
-              "tx_hash": "0x95cd603fe577fa9548ec0c9b50b067566fe07c8af6acba45f6196f3a15d511f6",
+              "tx_hash": "ltx1jhxkq0l9wlaf2j8vpjd4pvr82eh7qly276kt530kr9hn59w4z8mq44ua8h",
               "type": "event",
               "value": {
                 "token_created": {
@@ -60,7 +60,7 @@ expression: "&slot"
                 "name": "Bank"
               },
               "number": 1,
-              "tx_hash": "0x95cd603fe577fa9548ec0c9b50b067566fe07c8af6acba45f6196f3a15d511f6",
+              "tx_hash": "ltx1jhxkq0l9wlaf2j8vpjd4pvr82eh7qly276kt530kr9hn59w4z8mq44ua8h",
               "type": "event",
               "value": {
                 "token_frozen": {
@@ -72,7 +72,7 @@ expression: "&slot"
               }
             }
           ],
-          "hash": "0x95cd603fe577fa9548ec0c9b50b067566fe07c8af6acba45f6196f3a15d511f6",
+          "hash": "ltx1jhxkq0l9wlaf2j8vpjd4pvr82eh7qly276kt530kr9hn59w4z8mq44ua8h",
           "number": 0,
           "receipt": {
             "data": 0,
@@ -96,7 +96,7 @@ expression: "&slot"
                 "name": "Bank"
               },
               "number": 2,
-              "tx_hash": "0x709b55bd3da0f5a838125bd0ee20c5bfdd7caba173912d4281cae816b79a201b",
+              "tx_hash": "ltx1wzd4t0fa5r66swqjt0gwugx9hlwhe2apwwgj6s5pet5pddu6yqdsfyr8jn",
               "type": "event",
               "value": {
                 "token_created": {
@@ -122,7 +122,7 @@ expression: "&slot"
                 "name": "Bank"
               },
               "number": 3,
-              "tx_hash": "0x709b55bd3da0f5a838125bd0ee20c5bfdd7caba173912d4281cae816b79a201b",
+              "tx_hash": "ltx1wzd4t0fa5r66swqjt0gwugx9hlwhe2apwwgj6s5pet5pddu6yqdsfyr8jn",
               "type": "event",
               "value": {
                 "token_frozen": {
@@ -134,7 +134,7 @@ expression: "&slot"
               }
             }
           ],
-          "hash": "0x709b55bd3da0f5a838125bd0ee20c5bfdd7caba173912d4281cae816b79a201b",
+          "hash": "ltx1wzd4t0fa5r66swqjt0gwugx9hlwhe2apwwgj6s5pet5pddu6yqdsfyr8jn",
           "number": 1,
           "receipt": {
             "data": 1,
@@ -146,7 +146,7 @@ expression: "&slot"
       "type": "batch"
     },
     {
-      "hash": "0x52009f18a8f88c5e14d5b73a734de2c06426e81fcf2397a70ea7b060a809bf3c",
+      "hash": "lba12gqf7x9glzx9u9x4kua8xn0zcpjzd6qleu3e0fcw57cxp2qfhu7qv72y2m",
       "number": 1,
       "receipt": 1.0,
       "slot_number": 0,
@@ -171,7 +171,7 @@ expression: "&slot"
                 "name": "Bank"
               },
               "number": 4,
-              "tx_hash": "0x27ca64c092a959c7edc525ed45e845b1de6a7590d173fd2fad9133c8a779a1e3",
+              "tx_hash": "ltx1yl9xfsyj49vu0mw9yhk5t6z9k80x5avs69el6tadjyeu3fme583ss952s0",
               "type": "event",
               "value": {
                 "token_created": {
@@ -197,7 +197,7 @@ expression: "&slot"
                 "name": "Bank"
               },
               "number": 5,
-              "tx_hash": "0x27ca64c092a959c7edc525ed45e845b1de6a7590d173fd2fad9133c8a779a1e3",
+              "tx_hash": "ltx1yl9xfsyj49vu0mw9yhk5t6z9k80x5avs69el6tadjyeu3fme583ss952s0",
               "type": "event",
               "value": {
                 "token_frozen": {
@@ -209,7 +209,7 @@ expression: "&slot"
               }
             }
           ],
-          "hash": "0x27ca64c092a959c7edc525ed45e845b1de6a7590d173fd2fad9133c8a779a1e3",
+          "hash": "ltx1yl9xfsyj49vu0mw9yhk5t6z9k80x5avs69el6tadjyeu3fme583ss952s0",
           "number": 2,
           "receipt": {
             "data": 2,
@@ -233,7 +233,7 @@ expression: "&slot"
                 "name": "Bank"
               },
               "number": 6,
-              "tx_hash": "0x1f3cb18e896256d7d6bb8c11a6ec71f005c75de05e39beae5d93bbd1e2c8b7a9",
+              "tx_hash": "ltx1ru7trr5fvftd044m3sg6dmr37qzuwh0qtcumatjajwaarckgk75sknzx0g",
               "type": "event",
               "value": {
                 "token_created": {
@@ -259,7 +259,7 @@ expression: "&slot"
                 "name": "Bank"
               },
               "number": 7,
-              "tx_hash": "0x1f3cb18e896256d7d6bb8c11a6ec71f005c75de05e39beae5d93bbd1e2c8b7a9",
+              "tx_hash": "ltx1ru7trr5fvftd044m3sg6dmr37qzuwh0qtcumatjajwaarckgk75sknzx0g",
               "type": "event",
               "value": {
                 "token_frozen": {
@@ -271,7 +271,7 @@ expression: "&slot"
               }
             }
           ],
-          "hash": "0x1f3cb18e896256d7d6bb8c11a6ec71f005c75de05e39beae5d93bbd1e2c8b7a9",
+          "hash": "ltx1ru7trr5fvftd044m3sg6dmr37qzuwh0qtcumatjajwaarckgk75sknzx0g",
           "number": 3,
           "receipt": {
             "data": 3,
@@ -284,9 +284,9 @@ expression: "&slot"
     }
   ],
   "finality_status": "finalized",
-  "hash": "0x297542c7e17d3a07d8c381ab77b19d1e2df29ab830fe5cb60d75e362fd8f590f",
+  "hash": "lblk1996593lp05aq0kxrsx4h0vvarckl9x4cxrl9edsdwh3k9lv0ty8sgfwcrh",
   "number": 0,
-  "state_root": "0x73746174652d726f6f742d30",
+  "state_root": "lsr1wd6xzar994ex7mm595cqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqz3ltjy",
   "timestamp": 100000.0,
   "type": "slot"
 }

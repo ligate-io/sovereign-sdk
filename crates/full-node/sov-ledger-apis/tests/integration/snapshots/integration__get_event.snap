@@ -8,7 +8,7 @@ expression: "*response"
     "name": "Bank"
   },
   "number": 1,
-  "tx_hash": "0x0101010101010101010101010101010101010101010101010101010101010101",
+  "tx_hash": "ltx1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqssayepf",
   "type": "event",
   "value": {
     "token_frozen": {

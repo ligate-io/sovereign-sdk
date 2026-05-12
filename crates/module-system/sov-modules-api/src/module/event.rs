@@ -1,5 +1,5 @@
-use sov_rollup_interface::common::HexHash;
 use sov_rollup_interface::stf::TxReceiptContents;
+use sov_rollup_interface::TxHash;
 
 /// A trait that enables event processing for storage
 pub trait RuntimeEventProcessor {
@@ -63,8 +63,11 @@ pub struct RuntimeEventResponse<E> {
     pub value: E,
     /// Module name
     pub module: ModuleRef,
-    /// The hash of the transaction that emitted this event, in hex format
-    pub tx_hash: HexHash,
+    /// The hash of the transaction that emitted this event, bech32m-encoded
+    /// (`ltx1...`) to match `LedgerTx.hash`. Backwards-compatible
+    /// deserialisation still accepts the legacy `0x...` hex form via
+    /// `LtxHash::FromStr` for clients pinned to the old encoding.
+    pub tx_hash: TxHash,
 }
 
 impl<E> TryFrom<(u64, &sov_rollup_interface::stf::StoredEvent)> for RuntimeEventResponse<E>
@@ -95,7 +98,7 @@ where
             key: key_str,
             value: runtime_event,
             module: ModuleRef { name: module_name },
-            tx_hash: HexHash::from(*stored_event.tx_hash()),
+            tx_hash: TxHash::from(*stored_event.tx_hash()),
         })
     }
 }

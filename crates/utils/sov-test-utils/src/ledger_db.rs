@@ -213,8 +213,14 @@ pub fn materialize_and_commit_complex_ledger_db_data(
 
     let mut ledger_data = SchemaBatch::new();
     for slot in slots {
-        let state_root = format!("state-root-{}", slot.slot_data().header.height);
-        ledger_data.merge(ledger_db.materialize_slot(slot, state_root.as_bytes())?);
+        // The sov-ledger-apis Slot constructor asserts `state_root` is
+        // exactly 64 bytes (NOMT's root size). Pad a deterministic
+        // human-readable prefix with zeros to satisfy that invariant.
+        let prefix = format!("state-root-{}", slot.slot_data().header.height);
+        let mut state_root = [0u8; 64];
+        let n = prefix.len().min(state_root.len());
+        state_root[..n].copy_from_slice(&prefix.as_bytes()[..n]);
+        ledger_data.merge(ledger_db.materialize_slot(slot, &state_root)?);
         ledger_db.send_notifications();
         storage_manager.commit(&ledger_data);
     }

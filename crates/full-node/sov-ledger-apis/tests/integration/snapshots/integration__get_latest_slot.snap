@@ -8,9 +8,9 @@ expression: "&slot"
     "start": 2
   },
   "finality_status": "pending",
-  "hash": "0xef6877158b6e72d971ccf69732380dc1831727a62b0dbba184d4780ca256aeaa",
+  "hash": "lblk1aa58w9vtdeedjuwv76tnywqdcxp3wfax9vxmhgvy63uqegjk464qrhrufe",
   "number": 1,
-  "state_root": "0x73746174652d726f6f742d31",
+  "state_root": "lsr1wd6xzar994ex7mm595csqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq06s837",
   "timestamp": 200000.0,
   "type": "slot"
 }

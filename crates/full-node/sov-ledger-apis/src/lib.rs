@@ -36,7 +36,22 @@ use sov_rollup_interface::node::ledger_api::{
 use sov_rollup_interface::stf::TxReceiptContents;
 use tokio::sync::watch;
 
-type PathMap = Path<HashMap<String, NumberOrHash>>;
+/// Generic axum path extractor over a `String -> NumberOrHash<H>` map. Each
+/// route specialises `H` to the appropriate bech32m hash type so the HRP
+/// check rejects mismatched hashes at extraction time (`lblk1...` on a tx
+/// path 400s before the handler runs, etc).
+type PathMap<H> = Path<HashMap<String, NumberOrHash<H>>>;
+/// Slot-id path: number or `lblk1...` block hash.
+type SlotPathMap = PathMap<BlockHash>;
+/// Batch-id path: number or `lba1...` batch hash.
+type BatchPathMap = PathMap<BatchHash>;
+/// Tx-id path: number or `ltx1...` tx hash.
+type TxPathMap = PathMap<TxHash>;
+/// Offset-only path: hash variant is never used at runtime, but
+/// `NumberOrHash` still has to instantiate. Picks `TxHash` as the
+/// arbitrary placeholder; only the `Number` variant ever deserialises
+/// here because the path parameter is always an integer offset.
+type OffsetPathMap = PathMap<TxHash>;
 
 /// Maximum value of `page[cursor]` accepted on the prefix path of `list_events`.
 /// Bounds per-request work since the current implementation re-reads everything
@@ -58,7 +73,10 @@ fn bad_path_error(key: &str) -> Response {
 
 /// Finds a specific path component in a [`PathMap`] of type [`NumberOrHash`].
 #[allow(clippy::result_large_err)]
-fn get_path_item(path_map: &PathMap, key: &str) -> Result<NumberOrHash, Response> {
+fn get_path_item<H: Copy>(
+    path_map: &PathMap<H>,
+    key: &str,
+) -> Result<NumberOrHash<H>, Response> {
     if let Some(value) = path_map.get(key) {
         Ok(*value)
     } else {
@@ -69,7 +87,7 @@ fn get_path_item(path_map: &PathMap, key: &str) -> Result<NumberOrHash, Response
 /// Finds a specific path component in a [`PathMap`] of type [`u64`]. Used for
 /// parsing offsets.
 #[allow(clippy::result_large_err)]
-fn get_path_number(path_map: &PathMap, key: &str) -> Result<u64, Response> {
+fn get_path_number<H>(path_map: &PathMap<H>, key: &str) -> Result<u64, Response> {
     if let Some(value) = path_map.get(key).and_then(|value| value.as_u64()) {
         Ok(value)
     } else {
@@ -512,7 +530,7 @@ where
 
     async fn resolve_slot_id(
         State(state): State<LedgerState<T>>,
-        path_values: PathMap,
+        path_values: SlotPathMap,
         mut request: Request,
         next: Next,
     ) -> Result<Response, Response> {
@@ -542,7 +560,7 @@ where
     }
 
     async fn resolve_batch_id(
-        path_values: PathMap,
+        path_values: BatchPathMap,
         State(state): State<LedgerState<T>>,
         mut request: Request,
         next: Next,
@@ -564,7 +582,7 @@ where
 
     async fn resolve_tx_id(
         State(state): State<LedgerState<T>>,
-        path_values: PathMap,
+        path_values: TxPathMap,
         mut request: Request,
         next: Next,
     ) -> Result<Response, Response> {
@@ -585,7 +603,7 @@ where
 
     async fn resolve_event_id(
         State(state): State<LedgerState<T>>,
-        path_values: PathMap,
+        path_values: OffsetPathMap,
         mut request: Request,
         next: Next,
     ) -> Result<Response, Response> {
@@ -613,7 +631,7 @@ where
 
     async fn resolve_batch_offset(
         State(state): State<LedgerState<T>>,
-        path_values: PathMap,
+        path_values: OffsetPathMap,
         Extension(slot_number): Extension<SlotNumber>,
         mut request: Request,
         next: Next,
@@ -637,7 +655,7 @@ where
 
     async fn resolve_tx_offset(
         State(state): State<LedgerState<T>>,
-        path_values: PathMap,
+        path_values: OffsetPathMap,
         Extension(batch_number): Extension<BatchNumber>,
         mut request: Request,
         next: Next,
@@ -661,7 +679,7 @@ where
 
     async fn resolve_event_offset(
         State(state): State<LedgerState<T>>,
-        path_values: PathMap,
+        path_values: OffsetPathMap,
         Extension(tx_number): Extension<TxNumber>,
         mut request: Request,
         next: Next,
@@ -938,26 +956,42 @@ struct SlotEvents<E> {
     events: Vec<RuntimeEventResponse<E>>,
 }
 
+/// A path-component identifier that is either a numeric id (slot height,
+/// batch number, tx number, etc.) or a bech32m-encoded hash.
+///
+/// Generic over the hash type `H` so each route specialises to the
+/// correct HRP:
+///
+/// - `NumberOrHash<BlockHash>` accepts `lblk1...` (slot ids)
+/// - `NumberOrHash<BatchHash>` accepts `lba1...` (batch ids)
+/// - `NumberOrHash<TxHash>` accepts `ltx1...` (tx ids)
+///
+/// All three variants also accept legacy `0x...` hex via the underlying
+/// `FromStr` impl in [`sov_rollup_interface::common::bech32m_encoded`].
+/// Wrong-HRP inputs fall to a 400 at extractor time, so handlers never
+/// see them.
 #[serde_with::serde_as]
-#[derive(
-    Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, derive_more::Display,
-)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
-enum NumberOrHash {
+enum NumberOrHash<H> {
     Number(#[serde_as(as = "serde_with::DisplayFromStr")] u64),
-    // Accepts the chain's `ltx1...` bech32m form via `LtxHash::FromStr`,
-    // and the legacy `0x...` hex form (for backwards-compat) via the
-    // same impl. Slot-hash paths that aren't tx hashes (`lblk1...`) hit
-    // the FromStr error path and fall through to a 400; in practice
-    // slot lookups use the number variant anyway.
-    Hash(TxHash),
+    Hash(H),
 }
 
-impl NumberOrHash {
+impl<H> NumberOrHash<H> {
     fn as_u64(&self) -> Option<u64> {
         match self {
             NumberOrHash::Number(number) => Some(*number),
             _ => None,
+        }
+    }
+}
+
+impl<H: core::fmt::Display> core::fmt::Display for NumberOrHash<H> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            NumberOrHash::Number(n) => write!(f, "{}", n),
+            NumberOrHash::Hash(h) => write!(f, "{}", h),
         }
     }
 }
@@ -1126,9 +1160,18 @@ mod tests {
 
     #[test]
     fn number_or_hash_to_string() {
-        assert_eq!(NumberOrHash::Number(0).to_string(), "0");
-        // `Hash` carries `TxHash` (= `LtxHash`), so Display emits `ltx1...`.
-        let hash_str = NumberOrHash::Hash(TxHash::new([0; 32])).to_string();
-        assert!(hash_str.starts_with("ltx1"), "got {hash_str}");
+        // Number variant prints as a plain integer regardless of H.
+        let n: NumberOrHash<TxHash> = NumberOrHash::Number(0);
+        assert_eq!(n.to_string(), "0");
+
+        // Hash variant prints with its type's HRP. Each route specialises
+        // to the matching HRP so wrong-HRP inputs fall to 400 at extraction
+        // time (see `NumberOrHash<H>` doc comment).
+        let tx = NumberOrHash::Hash(TxHash::new([0; 32]));
+        assert!(tx.to_string().starts_with("ltx1"), "got {tx}");
+        let batch = NumberOrHash::Hash(BatchHash::new([0; 32]));
+        assert!(batch.to_string().starts_with("lba1"), "got {batch}");
+        let block = NumberOrHash::Hash(BlockHash::new([0; 32]));
+        assert!(block.to_string().starts_with("lblk1"), "got {block}");
     }
 }

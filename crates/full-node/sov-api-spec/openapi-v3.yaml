@@ -672,7 +672,7 @@ components:
                 type: object
                 additionalProperties: true
               chain_hash:
-                $ref: "#/components/schemas/HexString"
+                $ref: "#/components/schemas/Hash"
             required:
               - schema
               - chain_hash
@@ -757,7 +757,7 @@ components:
         hash:
           $ref: "#/components/schemas/Hash"
         state_root:
-          $ref: "#/components/schemas/HexString"
+          $ref: "#/components/schemas/Hash"
         batch_range:
           $ref: "#/components/schemas/Uint64Range"
         batches:

@@ -9,7 +9,7 @@ use futures::{Stream, StreamExt};
 use sov_mock_da::storable::StorableMockDaService;
 use sov_modules_api::capabilities::config_chain_id;
 use sov_modules_api::transaction::TxDetails;
-use sov_modules_api::{CryptoSpec, HexHash, Runtime, Spec, TxHash};
+use sov_modules_api::{CryptoSpec, Runtime, Spec, TxHash};
 use sov_node_client::NodeClient;
 use sov_rollup_interface::node::ledger_api::IncludeChildren;
 use sov_test_utils::ledger_db::sov_api_spec::types::{Slot, TxReceiptResult};

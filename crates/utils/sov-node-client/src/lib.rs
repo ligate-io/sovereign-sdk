@@ -105,13 +105,22 @@ impl NodeClient {
     /// Fetches the nonce associated with a given public key.
     /// Returns an error if the HTTP request fails or the response cannot be parsed.
     /// If nonce is not found, it will return 0.
+    ///
+    /// The chain exposes the nonce table under the `uniqueness` module
+    /// path: `/modules/uniqueness/state/nonces/items/<credential_id>`.
+    /// Upstream Sovereign Labs uses the same module under the legacy
+    /// name `nonces`; this fork renamed it to `sov-uniqueness` along
+    /// with the `MultiAddress` work but didn't update this URL, which
+    /// caused every account that had sent more than one tx to hit
+    /// `Tx bad nonce: expected: N, but found: 0` (404 -> error_for_status
+    /// -> silent fallthrough to 0). See `ligate-io/sovereign-sdk#TBD`.
     pub async fn get_nonce_for_public_key<S: sov_modules_api::Spec>(
         &self,
         pub_key: &<S::CryptoSpec as CryptoSpec>::PublicKey,
     ) -> anyhow::Result<u64> {
         let credential_id = pub_key.credential_id();
         let nonce_url = format!(
-            "{}/modules/nonces/state/nonces/items/{}",
+            "{}/modules/uniqueness/state/nonces/items/{}",
             self.base_url, credential_id
         );
         let response = self.http_client.get(&nonce_url).send().await?;

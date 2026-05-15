@@ -68,9 +68,10 @@ fn module_endpoints(
         // Bank
         format!("modules/bank/tokens/?token_name={token_id}/balances/&sender={address}"),
         format!("modules/bank/tokens/{token_id}/total-supply").to_string(),
-        // Nonces
-        "modules/nonces/state/nonces".to_string(),
-        format!("modules/nonces/state/nonces/items/{credentials_id}"),
+        // Nonces (exposed under `uniqueness` after the
+        // `sov-nonces` -> `sov-uniqueness` rename).
+        "modules/uniqueness/state/nonces".to_string(),
+        format!("modules/uniqueness/state/nonces/items/{credentials_id}"),
         // Sequencer
         "modules/sequencer-registry/state/allowed-sequencers".to_string(),
         format!("modules/sequencer-registry/state/allowed-sequencers/items/{seq_da_address}"),

@@ -86,10 +86,18 @@ where
     endpoints.axum_router = endpoints.axum_router.fallback(errors::global_404);
 
     // Even if runtime does not have Open API spec, we still want to plug in Sequencer and Ledger.
+    // Start from the runtime's spec so any title/description/contact/license overrides defined
+    // in `Runtime::openapi_spec()` flow through to the served spec. Fall back to SDK defaults
+    // only when the runtime has no spec to provide (e.g. early-boot or template rollups that
+    // didn't bother to customize).
     let mut runtime_spec = B::Runtime::default().openapi_spec().unwrap_or_default();
-    runtime_spec.info.title = "Sovereign SDK Rollup JSON API".to_string();
-    runtime_spec.info.description =
-        Some("Sovereign SDK Runtime, Ledger and Sequencer JSON API".to_string());
+    if runtime_spec.info.title.is_empty() {
+        runtime_spec.info.title = "Sovereign SDK Rollup JSON API".to_string();
+    }
+    if runtime_spec.info.description.is_none() {
+        runtime_spec.info.description =
+            Some("Sovereign SDK Runtime, Ledger and Sequencer JSON API".to_string());
+    }
 
     // Specs
     let serialized_runtime = sov_modules_api::prelude::serde_yaml::to_string(&runtime_spec)?;

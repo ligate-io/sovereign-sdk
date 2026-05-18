@@ -382,6 +382,11 @@ pub(crate) fn apply_batch<S, RT, B>(
     sequencer_bond: Amount,
     gas_price: <S::Gas as Gas>::Price,
     execution_context: ExecutionContext,
+    // DA inclusion height of the slot this batch was in. `Some(h)` on
+    // node-side replay; `None` on sequencer-optimistic execution. Set
+    // on BatchSequencerReceipt below for explorer-side Celenium
+    // deep-links (chain#355).
+    da_block_height: Option<u64>,
 ) -> (IncrementalBatchReceipt<S>, StateCheckpoint<S>)
 where
     S: Spec,
@@ -624,6 +629,7 @@ where
             outcome: BatchSequencerOutcome {
                 rewards: rewards.clone(),
             },
+            da_block_height,
         },
     };
 

@@ -35,7 +35,10 @@ pub use sov_modules_api::{BatchWithId, BlobData, Runtime};
 use sov_modules_api::{
     BlobDataWithId, DaSpec, ExecutionContext, Gas, Genesis, Spec, StateCheckpoint,
 };
-#[cfg(feature = "native")]
+// BlockHeaderTrait used in both native and zkVM paths now — apply_slot_with_control_flow
+// reads `slot_header.height()` unconditionally to thread `da_block_height` into
+// BatchSequencerReceipt (chain#355). Dropping the `#[cfg(feature = "native")]` gate the
+// import previously had; the trait itself is tiny and unused imports are harmless.
 use sov_rollup_interface::da::BlockHeaderTrait;
 use sov_rollup_interface::da::RelevantBlobIters;
 use sov_rollup_interface::stf::{ApplySlotOutput, StateTransitionFunction};
@@ -563,6 +566,14 @@ where
                 state,
                 execution_context,
                 visible_hash,
+                // Node-side execution path: slot header is in scope so the
+                // DA inclusion height is known. Threaded down to
+                // BatchSequencerReceipt for the explorer-side Celenium
+                // deep-link feature (#355). The sequencer's optimistic
+                // pre-inclusion path calls apply_batches_in_user_space
+                // with `None` because the blob hasn't been submitted yet
+                // (see sov-sequencer/preferred/block_executor.rs).
+                Some(slot_header.height()),
             );
 
         let mut kernel_state_accessor = runtime.kernel().accessor(&mut state);
@@ -653,6 +664,13 @@ where
         mut state: StateCheckpoint<S>,
         execution_context: ExecutionContext,
         visible_hash: <<S as Spec>::Storage as Storage>::Root,
+        // DA block height of the slot this batch was included in.
+        // `Some(h)` on the node-side replay path (apply_slot has the
+        // slot header in scope); `None` on the sequencer's optimistic
+        // pre-inclusion path (block_executor) where the height is not
+        // yet known. Threaded into BatchSequencerReceipt.da_block_height
+        // for the explorer's Celenium deep-links (#355).
+        da_block_height: Option<u64>,
     ) -> (
         <S as Spec>::Gas,
         Vec<
@@ -729,6 +747,7 @@ where
                         sequencer_bond,
                         gas_price,
                         execution_context,
+                        da_block_height,
                     );
 
                     // Metrics section
@@ -762,6 +781,7 @@ where
                         &sender,
                         &gas_price,
                         execution_context,
+                        da_block_height,
                     );
 
                     let gas_used = &batch_receipt.inner.gas_used;

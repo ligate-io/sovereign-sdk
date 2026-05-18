@@ -506,11 +506,12 @@ pub struct BatchSequencerOutcome {
 /// A receipt for a batch that was submitted by a sequencer to the DA layer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, derive_more::Display)]
 #[display(
-    "{{ da_address: {}, gas_price: {}, gas_used: {}, outcome: {} }}",
+    "{{ da_address: {}, gas_price: {}, gas_used: {}, outcome: {}, da_block_height: {:?} }}",
     da_address,
     gas_price,
     gas_used,
-    outcome
+    outcome,
+    da_block_height
 )]
 #[serde(bound = "S: Spec")]
 pub struct BatchSequencerReceipt<S: Spec> {
@@ -522,6 +523,24 @@ pub struct BatchSequencerReceipt<S: Spec> {
     pub gas_used: S::Gas,
     /// The sequencer outcome for this batch.
     pub outcome: BatchSequencerOutcome,
+    /// DA-layer block height where this batch's blob was included.
+    ///
+    /// `Some(height)` for receipts produced by the node-side `apply_slot`
+    /// path (which has the slot header in scope and reads `header.height()`
+    /// at construction). `None` for receipts produced by the sequencer's
+    /// optimistic pre-inclusion execution (`sov-sequencer`'s preferred
+    /// block executor) — at sequencer-execute time the blob has not yet
+    /// been submitted, so the height is genuinely unknown. The
+    /// canonical receipts indexed off the ledger DB are always the
+    /// node-side ones, so consumers (api / explorer) reliably get
+    /// `Some(height)`.
+    ///
+    /// `#[serde(default)]` so JSON receipts produced before this field
+    /// existed deserialize gracefully as `None` instead of failing.
+    /// Powers explorer-side Celenium deep-links per
+    /// ligate-io/ligate-chain#355.
+    #[serde(default)]
+    pub da_block_height: Option<u64>,
 }
 
 #[cfg(test)]

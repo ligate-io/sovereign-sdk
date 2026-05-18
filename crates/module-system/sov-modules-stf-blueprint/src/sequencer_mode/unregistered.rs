@@ -175,6 +175,9 @@ pub(crate) fn apply_batch<S, RT>(
     sequencer_da_address: &<S::Da as DaSpec>::Address,
     gas_price: &<S::Gas as Gas>::Price,
     execution_context: ExecutionContext,
+    // DA inclusion height; same semantics as the registered::apply_batch
+    // counterpart. Threaded into BatchSequencerReceipt for #355.
+    da_block_height: Option<u64>,
 ) -> (BatchReceipt<S>, StateCheckpoint<S>)
 where
     S: Spec,
@@ -214,6 +217,7 @@ where
                             accumulated_penalty: Amount::ZERO,
                         },
                     },
+                    da_block_height,
                 },
             }
         };
@@ -349,6 +353,7 @@ where
                     accumulated_penalty: Amount::ZERO,
                 },
             },
+            da_block_height,
         },
     };
 

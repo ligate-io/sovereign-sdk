@@ -1019,6 +1019,12 @@ where
         checkpoint,
         executor_context,
         next_root,
+        // None: this is the sequencer's optimistic pre-inclusion path.
+        // The blob hasn't been submitted to DA yet, so the inclusion
+        // height is genuinely unknown. The canonical receipts indexed
+        // off the ledger DB are the node-side ones (via apply_slot),
+        // which thread Some(slot_header.height()) — see #355.
+        None,
     );
 
     stf.materialize_accessory_state(&mut Default::default(), &mut checkpoint);

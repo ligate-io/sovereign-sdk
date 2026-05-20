@@ -485,6 +485,14 @@ where
                     "Unexpected Error. The sequencer is unable to accept transactions.",
                 ));
             }
+            Err(SequencerStateUpdatorError::PromotionFailed(_)) => {
+                // accept_tx never originates promotion/demotion requests, so a
+                // PromotionFailed surfaced here would be a bug elsewhere. Treat
+                // as 500 — same outer behavior as Unexpected.
+                return Err(internal_server_error_500(
+                    "Unexpected Error. The sequencer is unable to accept transactions.",
+                ));
+            }
         };
 
         match res {

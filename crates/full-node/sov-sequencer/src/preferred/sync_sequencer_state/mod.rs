@@ -148,6 +148,36 @@ pub(super) enum Message<S: Spec, Rt: Runtime<S>> {
         resp: oneshot::Sender<SequencerRole>,
         reason: &'static str,
     },
+    /// In-process Replica → Leader transition. Sent by the heartbeat task in
+    /// `db/heartbeat_task.rs::spawn_replica_heartbeat_task` after this node wins
+    /// the Postgres leadership lock. Replaces the pre-Bug-3 pattern of sending
+    /// on the global shutdown channel and relying on systemd to restart the
+    /// process as a fresh leader. The actor flips `Inner.seq_role` to
+    /// `BatchProducer`, performs any role-conditional state migration (Phase 3
+    /// adds backend + blob-sender hot-swap here), and confirms via `confirm`.
+    /// The heartbeat task awaits `confirm` and then runs the leader heartbeat
+    /// loop in the same task.
+    ///
+    /// See ligate-io/ligate-chain#435 for the failover incident this replaces.
+    PromoteToLeader {
+        confirm: oneshot::Sender<anyhow::Result<()>>,
+        reason: &'static str,
+    },
+    /// In-process Leader → Replica transition. Symmetric to `PromoteToLeader`.
+    /// Sent by the heartbeat task in `db/heartbeat_task.rs::spawn_leader_heartbeat_task`
+    /// when the current node loses the Postgres leadership lock (network
+    /// blip, deliberate operator failover, etc.). The actor flips
+    /// `Inner.seq_role` to `PgSyncReplica`, drops the leader-only side-effects
+    /// (backend + blob sender, added in Phase 4), and confirms.
+    ///
+    /// In-flight batch (if any) is discarded — Postgres's `is_leader(...)` gate
+    /// in every write path already rejects post-lock-loss writes from the old
+    /// leader, so dropping the in-memory batch state matches what the database
+    /// already enforces.
+    DemoteToReplica {
+        confirm: oneshot::Sender<anyhow::Result<()>>,
+        reason: &'static str,
+    },
 }
 
 impl<S: Spec, Rt: Runtime<S>> Message<S, Rt> {

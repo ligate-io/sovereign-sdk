@@ -45,6 +45,12 @@ where
 pub(crate) enum SequencerStateUpdatorError {
     Shutdown,
     Unexpected,
+    /// In-process role transition (Promote / Demote, chain#435 Bug 3) failed.
+    /// Wraps the underlying cause so the heartbeat task can log + back off rather
+    /// than panicking. The actor side returns this only on side-effect failures
+    /// (Phase 3+ backend hot-swap); the Phase 2 handler only flips the atomic
+    /// and is infallible.
+    PromotionFailed(anyhow::Error),
 }
 
 impl SequencerStateUpdatorError {
@@ -54,6 +60,9 @@ impl SequencerStateUpdatorError {
         match self {
             SequencerStateUpdatorError::Shutdown => crate::preferred::StateUpdateError::Shutdown.into(),
             SequencerStateUpdatorError::Unexpected => anyhow::anyhow!("The sequencer experienced an unexpected error and cannot accept transactions! See logs for more details."),
+            SequencerStateUpdatorError::PromotionFailed(err) => {
+                anyhow::anyhow!("In-process sequencer role transition failed: {err}")
+            }
         }
     }
 }
@@ -383,5 +392,71 @@ where
         self.send(Message::GetSequencerRole { resp, reason })
             .await?;
         self.recv(recv).await
+    }
+
+    /// Sends [`Message::PromoteToLeader`] and waits for the actor's confirmation.
+    /// Returns `Ok(())` once the role has been flipped to `BatchProducer` and any
+    /// side-effects (backend / blob-sender hot-swap in Phase 3+) are in place.
+    ///
+    /// Called by the heartbeat task in `db/heartbeat_task.rs::spawn_replica_heartbeat_task`
+    /// after winning the Postgres leadership lock.
+    pub(crate) async fn promote_to_leader_msg(
+        &self,
+        reason: &'static str,
+    ) -> Result<(), SequencerStateUpdatorError> {
+        let (confirm, recv) = oneshot::channel();
+        self.send(Message::PromoteToLeader { confirm, reason })
+            .await?;
+        // The actor returns Result<(), anyhow::Error>. Map to SequencerStateUpdatorError so
+        // the caller has a single error type.
+        match self.recv(recv).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => Err(SequencerStateUpdatorError::PromotionFailed(err)),
+            Err(state_err) => Err(state_err),
+        }
+    }
+
+    /// Sends [`Message::DemoteToReplica`] and waits for the actor's confirmation.
+    /// Returns `Ok(())` once the role has been flipped to `PgSyncReplica`.
+    ///
+    /// Called by the heartbeat task in `db/heartbeat_task.rs::spawn_leader_heartbeat_task`
+    /// when leadership is lost (`try_acquire_leadership` returns `Ok(false)` or a
+    /// transient `Err` that the existing code path treated as fatal).
+    pub(crate) async fn demote_to_replica_msg(
+        &self,
+        reason: &'static str,
+    ) -> Result<(), SequencerStateUpdatorError> {
+        let (confirm, recv) = oneshot::channel();
+        self.send(Message::DemoteToReplica { confirm, reason })
+            .await?;
+        match self.recv(recv).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => Err(SequencerStateUpdatorError::PromotionFailed(err)),
+            Err(state_err) => Err(state_err),
+        }
+    }
+}
+
+/// Bridges the heartbeat task (which is non-generic for ergonomics, see
+/// `db/heartbeat_task.rs`) to the generic `SequencerStateUpdator`. The
+/// heartbeat task holds this as `Arc<dyn RoleTransitionRequester>` and
+/// invokes `promote_to_leader` / `demote_to_replica` when the Postgres
+/// election state changes.
+#[async_trait::async_trait]
+impl<S, Rt> crate::preferred::db::heartbeat_task::RoleTransitionRequester
+    for SequencerStateUpdator<S, Rt>
+where
+    S: Spec,
+    Rt: Runtime<S>,
+{
+    async fn promote_to_leader(&self) -> anyhow::Result<()> {
+        self.promote_to_leader_msg("heartbeat: replica won the postgres lock")
+            .await
+            .map_err(|err| err.into_state_update_error())
+    }
+    async fn demote_to_replica(&self) -> anyhow::Result<()> {
+        self.demote_to_replica_msg("heartbeat: leader lost the postgres lock")
+            .await
+            .map_err(|err| err.into_state_update_error())
     }
 }

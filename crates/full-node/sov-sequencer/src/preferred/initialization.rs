@@ -250,7 +250,7 @@ where
         if let SequencerRole::PgSyncReplica = seq_role {
             if let Some(postgres_config) = &preferred_config.postgres_config {
                 let replica_task_handle = replica_task
-                    .start(synchronized_state_updator, postgres_config)
+                    .start(synchronized_state_updator.clone(), postgres_config)
                     .await;
                 handles.push(replica_task_handle.data_fetcher_handle);
                 handles.push(replica_task_handle.sync_task_handle);
@@ -259,11 +259,19 @@ where
 
         // Launch heartbeat tasks for leadership election and node registration
         if let Some(postgres_config) = &preferred_config.postgres_config {
+            // Give the heartbeat task a handle to the sequencer state actor so
+            // it can request in-process Promote / Demote on lock acquire / loss
+            // (chain#435 Bug 3). The Arc<SequencerStateUpdator<S, Rt>> coerces
+            // to Arc<dyn RoleTransitionRequester> via the impl in updator.rs.
+            let transitioner: std::sync::Arc<
+                dyn crate::preferred::db::heartbeat_task::RoleTransitionRequester,
+            > = synchronized_state_updator.clone();
             let heartbeat_task = HeartBeatTask::new(
                 postgres_config.clone(),
                 shutdown_sender.clone(),
                 bind_addr,
                 postgres_config.leader_election.heartbeat_interval(),
+                Some(transitioner),
             )
             .await?;
             let heartbeat_handle = heartbeat_task.spawn(seq_role).await;

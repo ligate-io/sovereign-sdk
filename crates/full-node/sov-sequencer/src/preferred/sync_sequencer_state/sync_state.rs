@@ -1,6 +1,6 @@
 use crate::metrics::{PreferredSequencerPruneMetrics, PreferredSequencerSlotNumberMetrics};
 use crate::preferred::block_executor::{RollupBlockExecutor, RollupBlockExecutorError};
-use crate::preferred::db::BatchToStore;
+use crate::preferred::db::{BatchToStore, SequencerRole};
 use crate::preferred::preferred_blob_sender::proof_bytes;
 use crate::preferred::rate_limiter::IpAndCredentialId;
 use crate::preferred::replica::db_data::DbData;
@@ -154,6 +154,13 @@ where
                             SequencerStateUpdatorError::Unexpected => {
                                 self.inner.shutdown_sender.send(()).unwrap();
                                 panic!("The sequencer experienced an unexpected error and cannot accept transactions! See logs for more details.");
+                            }
+                            // Promotion / demotion failures are recoverable; the
+                            // heartbeat task will retry on the next interval. Don't
+                            // tear the actor down for an in-process role transition
+                            // that didn't take.
+                            SequencerStateUpdatorError::PromotionFailed(err) => {
+                                tracing::error!(?err, "in-process role transition failed; the heartbeat task will retry");
                             }
                         }
                     }
@@ -410,9 +417,77 @@ where
                 drop(inner);
                 self.send_response(resp, role, "get_sequencer_role").await;
             }
+            Message::PromoteToLeader { confirm, reason } => {
+                self.process_promote_to_leader(confirm, reason).await;
+            }
+            Message::DemoteToReplica { confirm, reason } => {
+                self.process_demote_to_replica(confirm, reason).await;
+            }
         }
 
         Ok(())
+    }
+
+    /// In-process Replica → Leader transition. Phase 2 implementation: just flips
+    /// the atomic role. Phase 3 will extend this to hot-swap the Postgres backend
+    /// (`PreferredSequencerDb.backend`) and the blob sender (`PreferredBlobSender.inner`)
+    /// via a message to the `SideEffectsTask`.
+    ///
+    /// Idempotent: a no-op if the current role is already `BatchProducer`.
+    async fn process_promote_to_leader(
+        &mut self,
+        confirm: oneshot::Sender<anyhow::Result<()>>,
+        reason: &'static str,
+    ) {
+        let inner = self.get_inner_with_timing(reason).await;
+        let previous = inner.seq_role.load();
+        if previous == SequencerRole::BatchProducer {
+            tracing::warn!(
+                "PromoteToLeader received but role is already BatchProducer; no-op."
+            );
+            drop(inner);
+            let _ = confirm.send(Ok(()));
+            return;
+        }
+        tracing::info!(
+            ?previous,
+            "in-process role transition: PromoteToLeader (Phase 2 — atomic flip only; \
+             Phase 3 will additionally activate backend + blob sender). This replaces \
+             the pre-Bug-3 'exit to restart as leader' pattern."
+        );
+        inner.seq_role.store(SequencerRole::BatchProducer);
+        drop(inner);
+        let _ = confirm.send(Ok(()));
+    }
+
+    /// In-process Leader → Replica transition. Phase 2 implementation: just flips
+    /// the atomic role. Phase 4 will extend this to drop the Postgres backend +
+    /// blob sender and re-spawn the replica sync task.
+    ///
+    /// Idempotent: a no-op if the current role is already `PgSyncReplica`.
+    async fn process_demote_to_replica(
+        &mut self,
+        confirm: oneshot::Sender<anyhow::Result<()>>,
+        reason: &'static str,
+    ) {
+        let inner = self.get_inner_with_timing(reason).await;
+        let previous = inner.seq_role.load();
+        if previous == SequencerRole::PgSyncReplica {
+            tracing::warn!(
+                "DemoteToReplica received but role is already PgSyncReplica; no-op."
+            );
+            drop(inner);
+            let _ = confirm.send(Ok(()));
+            return;
+        }
+        tracing::info!(
+            ?previous,
+            "in-process role transition: DemoteToReplica (Phase 2 — atomic flip only; \
+             Phase 4 will drop leader-side state)."
+        );
+        inner.seq_role.store(SequencerRole::PgSyncReplica);
+        drop(inner);
+        let _ = confirm.send(Ok(()));
     }
 
     #[tracing::instrument(skip_all, level = "debug")]
@@ -431,7 +506,7 @@ where
         next_sequence_number: u64,
         reason: &'static str,
     ) -> FetchProofsAndCompletedBatches {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
 
         let (completed_blobs, metrics) =
             inner.proofs_and_completed_batches_for_replay(next_sequence_number, false);
@@ -496,7 +571,7 @@ where
             current_visible_slot_number_according_to_node::<S, Rt>(info).get();
 
         debug!(?info, "Processing state update info from update_state");
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
         let next_sequence_number = inner.next_unassigned_sequence_number;
         let ((blobs_to_replay, fetch_batches_to_replay_metrics), is_startup) = {
             (
@@ -691,7 +766,7 @@ where
         mut data: ProcessFinalCatchupData,
         reason: &'static str,
     ) -> Result<ProcessFinalCatchupData, SequenceNumberMismatchError> {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
         let tx_cache_writer = inner.tx_cache_writer.clone();
 
         let mut rt = Rt::default();
@@ -767,7 +842,7 @@ where
 
     async fn process_prune_sequencer_db(&mut self, reason: &'static str) {
         let start_prune = std::time::Instant::now();
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
         if !inner.is_replica_role() {
             inner.trigger_batch_production_if_convenient().await;
         }
@@ -789,7 +864,7 @@ where
         info: StateUpdateInfo<S::Storage>,
         reason: &'static str,
     ) {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
 
         // Since we're entering recovery, we don't re-use any of the uncommitted changes.
         // We don't need to populate the pinned cache because we'll replace the executor when we exit recovery before going back to normal operation.
@@ -810,7 +885,7 @@ where
         _distance: u64,
         reason: &'static str,
     ) {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
         let mut rt = Rt::default();
         inner.is_ready = Err(SequencerNotReadyDetails::Syncing {
             target_da_height: info.sync_status.target_da_height(),
@@ -846,7 +921,7 @@ where
         reason: &'static str,
         result_sender: oneshot::Sender<bool>,
     ) {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
         if !inner.executor.has_in_progress_batch() {
             let _ = result_sender.send(false); // If the receiver has dropped, we don't need to do anything about it.
             return;
@@ -861,7 +936,7 @@ where
         data: SerializedProofWithDetailsBytes,
         reason: &'static str,
     ) {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
         let sequence_number = inner.take_sequence_number_for_proof();
         let proof_bytes =
             proof_bytes(&data.0, sequence_number).expect("Serialization to vec is infallible");
@@ -875,7 +950,7 @@ where
         // This is mostly fine, mainly the API state will be out of date until we've
         // finished sending our batches.
         // Adding parallel state update handling is not worth the complexity right now.
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
         inner.trigger_batch_production().await;
     }
 
@@ -891,7 +966,7 @@ where
             .runtime
             .sequencing_data_handler()
             .create_sequencing_data();
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
 
         if inner.is_replica_role() {
             // The sequencer is running in replica mode and cannot accept transactions.
@@ -956,7 +1031,7 @@ where
         batch_from_master: BatchToStore,
         reason: &'static str,
     ) -> Result<(), ReplicaError<S>> {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
         let seq_nr_of_next_blob_for_this_executor = inner.next_unassigned_sequence_number;
         let seq_nr_from_master = batch_from_master.sequence_number;
 
@@ -1006,7 +1081,7 @@ where
         tx_hash: TxHash,
         reason: &'static str,
     ) -> Result<(), ReplicaError<S>> {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
         let db_data = DbData::Transaction(seq_nr_from_master, baked_tx.clone(), tx_hash);
         validate_db_data_from_replica_for_open_batch(
             inner.has_finished_startup,
@@ -1027,7 +1102,7 @@ where
         batch_from_master: BatchToStore,
         reason: &'static str,
     ) -> Result<(), ReplicaError<S>> {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
 
         let db_data = DbData::BatchEnd(batch_from_master);
         let seq_nr_from_master = db_data.sequence_number();
@@ -1064,7 +1139,7 @@ where
         proof_bytes: PreferredProofDataBytes,
         reason: &'static str,
     ) -> Result<(), ReplicaError<S>> {
-        let mut inner = self.get_inner_with_timing(reason).await;
+        let inner = self.get_inner_with_timing(reason).await;
 
         let next_unassigned_sequence_number = inner.next_unassigned_sequence_number;
         debug!(

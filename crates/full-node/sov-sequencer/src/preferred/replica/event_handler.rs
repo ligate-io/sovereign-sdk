@@ -36,6 +36,10 @@ impl<S: Spec> From<SequencerStateUpdatorError> for ReplicaError<S> {
         match value {
             SequencerStateUpdatorError::Shutdown => Self::Shutdown,
             SequencerStateUpdatorError::Unexpected => Self::UnexpectedShutdown,
+            // Replica codepath never originates promotion/demotion requests, so
+            // hitting this case here is itself unexpected. Map to UnexpectedShutdown
+            // so the replica's caller treats it as a hard failure.
+            SequencerStateUpdatorError::PromotionFailed(_) => Self::UnexpectedShutdown,
         }
     }
 }

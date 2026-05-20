@@ -163,7 +163,7 @@ where
             if let Err(err) = validate_batch_seq_nr_from_node(
                 batch.sequence_number,
                 min_sequence_number_of_open_batch,
-                self.seq_role,
+                self.seq_role.load(),
             ) {
                 match err {
                     SequenceNumberMismatchError::SkipStateUpdate => return Ok(()),
@@ -204,7 +204,7 @@ where
             }
             let event = db_event_subscription.try_recv().unwrap();
             if let Err(err) = do_next_event(
-                self.seq_role,
+                self.seq_role.load(),
                 min_sequence_number_of_open_batch,
                 &mut executor,
                 &tx_cache_writer,

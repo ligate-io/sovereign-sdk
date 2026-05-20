@@ -563,6 +563,78 @@ pub enum SequencerRole {
     BatchProducer,
 }
 
+impl SequencerRole {
+    /// Compact encoding for [`AtomicSequencerRole`]. Stable across rebuilds since
+    /// the discriminants are explicit.
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Self::DaOnlyReplica => 0,
+            Self::PgSyncReplica => 1,
+            Self::BatchProducer => 2,
+        }
+    }
+
+    /// Inverse of [`Self::as_u8`]. Panics on out-of-range input; only safe to
+    /// call on a value previously produced by [`Self::as_u8`].
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            0 => Self::DaOnlyReplica,
+            1 => Self::PgSyncReplica,
+            2 => Self::BatchProducer,
+            other => panic!("invalid SequencerRole encoding {other}; corrupt AtomicSequencerRole"),
+        }
+    }
+}
+
+/// Cross-task-visible [`SequencerRole`] state. Wraps an `Arc<AtomicU8>` so that
+/// background tasks (HTTP handlers, the `update_state` periodic loop, the
+/// `EventReceiverStartNotifier`) can observe role transitions made by the
+/// `SequencerStateUpdator` actor without going through a message round trip.
+///
+/// Mutations should only ever come from the actor (single writer). Readers
+/// load with `Acquire` ordering; writers store with `Release`. Cloning is cheap
+/// (`Arc` clone) and produces a handle that points at the same atomic cell.
+///
+/// Why this exists: pre-Bug-3, `seq_role` was a plain `SequencerRole` field
+/// copied into several long-lived structs at startup. After a `PromoteToLeader`
+/// flipped the actor's copy, those background tasks still saw the old role.
+/// This wrapper makes the transition visible everywhere with no extra wiring.
+#[derive(Clone)]
+pub struct AtomicSequencerRole(std::sync::Arc<std::sync::atomic::AtomicU8>);
+
+impl AtomicSequencerRole {
+    /// Create a new [`AtomicSequencerRole`] holding `role`.
+    pub fn new(role: SequencerRole) -> Self {
+        Self(std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+            role.as_u8(),
+        )))
+    }
+
+    /// Read the current role with `Acquire` ordering. Cheap; safe from any task.
+    pub fn load(&self) -> SequencerRole {
+        SequencerRole::from_u8(self.0.load(std::sync::atomic::Ordering::Acquire))
+    }
+
+    /// Replace the role with `Release` ordering. Should only be called from the
+    /// `SequencerStateUpdator` actor — the wrapper does not enforce this, but
+    /// concurrent writers from multiple tasks would race silently.
+    pub fn store(&self, role: SequencerRole) {
+        self.0
+            .store(role.as_u8(), std::sync::atomic::Ordering::Release);
+    }
+
+    /// Convenience for the very common pattern `self.seq_role.load() == role`.
+    pub fn is(&self, role: SequencerRole) -> bool {
+        self.load() == role
+    }
+}
+
+impl std::fmt::Debug for AtomicSequencerRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "AtomicSequencerRole({:?})", self.load())
+    }
+}
+
 pub struct PreferredSequencerDb {
     backend: Option<Box<dyn DbBackend>>,
     shutdown_sender: watch::Sender<()>,

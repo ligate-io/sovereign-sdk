@@ -28,7 +28,7 @@ use axum::http::StatusCode;
 use batch_size_tracker::BatchSizeTracker;
 use db::postgres::PostgresBackend;
 use db::rocksdb::RocksDbBackend;
-pub use db::SequencerRole;
+pub use db::{AtomicSequencerRole, SequencerRole};
 use db::{PreferredSequencerDb, ReadBatch, ReadBlob};
 use derive_more::Deref;
 use futures::Stream;
@@ -116,7 +116,12 @@ where
     Rt: Runtime<S>,
     Da: DaService<Spec = S::Da>,
 {
-    seq_role: SequencerRole,
+    /// Shared atomic view of the live sequencer role. See [`AtomicSequencerRole`]
+    /// for the cross-task-visibility contract; in `update_state`'s periodic loop
+    /// (`update_state.rs`) this is loaded with `Acquire` ordering on every tick so
+    /// in-process Replica → Leader promotions take effect without restarting the
+    /// background task.
+    seq_role: AtomicSequencerRole,
     synchronized_state_updator: Arc<SequencerStateUpdator<S, Rt>>,
     tx_status_manager: TxStatusManager<S::Da>,
     blobs_sender_channel: Option<broadcast::Sender<BlobExecutionStatus<Da::Spec>>>,

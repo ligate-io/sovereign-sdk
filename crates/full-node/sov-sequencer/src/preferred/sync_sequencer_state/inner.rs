@@ -7,7 +7,9 @@ use crate::preferred::block_executor::{
 };
 use crate::preferred::block_executor::{RollupBlockExecutorErrorWithBudget, StartBlockData};
 use crate::preferred::cache_warm_up_executor::{CacheWarmUpExecutor, StartBlockNotification};
-use crate::preferred::db::{latest_finalized_sequence_number, SequencerRole};
+use crate::preferred::db::{
+    latest_finalized_sequence_number, AtomicSequencerRole, SequencerRole,
+};
 use crate::preferred::executor_events::ExecutorEventsSender;
 use crate::preferred::rate_limiter::ResourceUsed;
 use crate::preferred::rate_limiter::SovRateLimiter;
@@ -73,7 +75,11 @@ where
     S: Spec,
     Rt: Runtime<S>,
 {
-    pub(crate) seq_role: SequencerRole,
+    /// The runtime-mutable role this node is operating in. Loaded with `Acquire`
+    /// ordering on every read; stored with `Release` only from inside the
+    /// `SequencerStateUpdator` actor (single-writer invariant; enforced by
+    /// convention, not by the type).
+    pub(crate) seq_role: AtomicSequencerRole,
     pub(crate) seq_config: SequencerConfig<S::Address, PreferredSequencerConfig<S::Address>>,
     pub(crate) shutdown_receiver: watch::Receiver<()>,
     pub(crate) shutdown_sender: watch::Sender<()>,
@@ -478,7 +484,7 @@ where
     }
 
     pub(crate) fn is_replica_role(&self) -> bool {
-        self.seq_role == SequencerRole::PgSyncReplica
+        self.seq_role.is(SequencerRole::PgSyncReplica)
     }
 
     /// Create a new batch, if possible. Errors here are expected, because it's not always possible to create a new batch due to transient DA issues.

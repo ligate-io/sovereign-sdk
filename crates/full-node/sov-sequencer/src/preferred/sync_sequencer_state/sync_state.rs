@@ -406,7 +406,7 @@ where
             }
             Message::GetSequencerRole { resp, reason } => {
                 let inner = self.get_inner_with_timing(reason).await;
-                let role = inner.seq_role;
+                let role = inner.seq_role.load();
                 drop(inner);
                 self.send_response(resp, role, "get_sequencer_role").await;
             }
@@ -707,7 +707,7 @@ where
             }
 
             do_next_event(
-                inner.seq_role,
+                inner.seq_role.load(),
                 next_sequence_number_according_to_node,
                 &mut executor,
                 &tx_cache_writer,

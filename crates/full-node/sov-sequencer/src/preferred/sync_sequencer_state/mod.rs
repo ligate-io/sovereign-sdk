@@ -2,7 +2,7 @@ use super::batch_size_tracker::BatchSizeTracker;
 use crate::preferred::block_executor::RollupBlockExecutor;
 use crate::preferred::cache_warm_up_executor::CacheWarmUpExecutor;
 use crate::preferred::db::BatchToStore;
-use crate::preferred::db::SequencerRole;
+use crate::preferred::db::{AtomicSequencerRole, SequencerRole};
 use crate::preferred::executor_events::ExecutorEventsSender;
 use crate::preferred::rate_limiter::IpAndCredentialId;
 use crate::preferred::rate_limiter::ResourceLimitExceededError;
@@ -165,7 +165,7 @@ impl<S: Spec, Rt: Runtime<S>> Message<S, Rt> {
 }
 
 pub(crate) fn create<S, Rt>(
-    seq_role: SequencerRole,
+    seq_role: AtomicSequencerRole,
     latest_info: StateUpdateInfo<S::Storage>,
     tx_queue_id: Arc<AtomicU64>,
     batch_execution_time_limit_micros: u64,

@@ -1,6 +1,6 @@
 use super::*;
 use crate::preferred::db::heartbeat_task::HeartBeatTask;
-use crate::preferred::db::SequencerRole;
+use crate::preferred::db::{AtomicSequencerRole, SequencerRole};
 use anyhow::Context;
 use anyhow::Result;
 use sov_db::ledger_db::LedgerDb;
@@ -92,6 +92,16 @@ where
         )
         .await?;
 
+        // The single source of truth for the live role. Cloned cheaply (Arc) into
+        // every long-lived holder that previously kept a static `SequencerRole`
+        // snapshot (Inner, PreferredSequencerFields, EventReceiverStartNotifier).
+        // The `SequencerStateUpdator` actor mutates this on in-process role
+        // transitions (chain#435 Bug 3); all other readers see updates via
+        // `Acquire` ordering. One-shot init decisions below (PreferredBlobSender,
+        // CacheWarmUpExecutor, the if-PgSyncReplica branch, the heartbeat task)
+        // continue to use the plain `seq_role` copy because they happen once.
+        let seq_role_atomic = AtomicSequencerRole::new(seq_role);
+
         let (next_sequence_number, db_cache) = db.initial_data().await?;
         let mut handles = vec![];
 
@@ -154,13 +164,13 @@ where
         }
 
         let (mut replica_task, start_replica_task_notifier) =
-            ReplicaSyncTask::new(shutdown_sender.clone(), seq_role).await?;
+            ReplicaSyncTask::new(shutdown_sender.clone(), seq_role_atomic.clone()).await?;
 
         let tx_queue_id = Arc::new(AtomicU64::new(0));
         let batch_execution_time_limit_micros =
             preferred_config.batch_execution_time_limit_millis * 1000;
         let (synchronized_state, synchronized_state_updator) = create(
-            seq_role,
+            seq_role_atomic.clone(),
             latest_state_update.clone(),
             tx_queue_id.clone(),
             batch_execution_time_limit_micros,
@@ -216,7 +226,7 @@ where
         handles.push(nonce_buffer_task);
 
         let seq = PreferredSequencer(Arc::new(PreferredSequencerFields {
-            seq_role,
+            seq_role: seq_role_atomic.clone(),
             synchronized_state_updator: synchronized_state_updator.clone(),
             tx_status_manager: tx_status_manager.clone(),
             transaction_cache: cached_txs,

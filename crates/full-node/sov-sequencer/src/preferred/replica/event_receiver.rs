@@ -1,4 +1,4 @@
-use crate::preferred::db::SequencerRole;
+use crate::preferred::db::{AtomicSequencerRole, SequencerRole};
 use crate::preferred::replica::db_data::row_to_event;
 use crate::preferred::replica::db_data::rows;
 use crate::preferred::replica::db_data::DbData;
@@ -35,11 +35,13 @@ pub(crate) enum EventReceiverError {
 pub(crate) struct EventReceiverStartNotifier {
     notify: watch::Sender<()>,
     replica_processed_first_batch: bool,
-    seq_role: SequencerRole,
+    /// Shared atomic handle to the live sequencer role. Was a static `SequencerRole`
+    /// snapshot pre-Bug-3; the snapshot went stale across in-process role transitions.
+    seq_role: AtomicSequencerRole,
 }
 
 impl EventReceiverStartNotifier {
-    pub(crate) fn new(seq_role: SequencerRole) -> (Self, watch::Receiver<()>) {
+    pub(crate) fn new(seq_role: AtomicSequencerRole) -> (Self, watch::Receiver<()>) {
         let (notify, mut receiver) = watch::channel(());
         receiver.borrow_and_update();
         (
@@ -56,7 +58,7 @@ impl EventReceiverStartNotifier {
     /// This method only has an effect when called on a replica sequencer, since the leader produces
     /// the DB events rather than consuming them.
     pub(crate) fn notify(&self) {
-        if self.seq_role == SequencerRole::BatchProducer {
+        if self.seq_role.is(SequencerRole::BatchProducer) {
             return;
         }
 
@@ -69,7 +71,7 @@ impl EventReceiverStartNotifier {
     pub(crate) fn check_replica_status_or_ok_for_leader(
         &self,
     ) -> Result<(), SequencerNotReadyDetails> {
-        if self.seq_role == SequencerRole::BatchProducer {
+        if self.seq_role.is(SequencerRole::BatchProducer) {
             return Ok(());
         }
 
@@ -86,7 +88,7 @@ impl EventReceiverStartNotifier {
     /// Panics if this method is called on a batch-producing sequencer.
     pub(crate) fn set_replica_processed_first_batch(&mut self) {
         assert_eq!(
-            self.seq_role,
+            self.seq_role.load(),
             SequencerRole::PgSyncReplica,
             "set_replica_processed_first_batch can only be called on a PgSyncReplica sequencer"
         );

@@ -98,7 +98,13 @@ pub(crate) async fn start_http_server(
         let axum_listener = axum_listener.tap_io(|tcp| {
             let _ = tcp.set_nodelay(true);
         });
-        let result = axum::serve(
+        // The graceful-shutdown future is moved into `axum::serve`; we keep a parallel
+        // `tokio::time::timeout` around the whole serve await so a reverse-proxy holding
+        // keepalive connections (or any in-flight long-running request) can't block
+        // process exit for the systemd `TimeoutStopSec` window. 20s gives reasonable
+        // requests a chance to finish; everything else is force-dropped at the timeout.
+        // See chain#435 (ligate-io/ligate-chain) for the incident this was added for.
+        let serve_future = axum::serve(
             axum_listener,
             ServiceExt::<axum::extract::Request>::into_make_service_with_connect_info::<SocketAddr>(
                 router,
@@ -106,16 +112,38 @@ pub(crate) async fn start_http_server(
         )
         .with_graceful_shutdown(async move {
             shutdown_receiver.changed().await.ok();
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!(e));
+        });
+        const HTTP_GRACEFUL_SHUTDOWN_TIMEOUT: std::time::Duration =
+            std::time::Duration::from_secs(20);
+        let result = match tokio::time::timeout(HTTP_GRACEFUL_SHUTDOWN_TIMEOUT, serve_future).await
+        {
+            Ok(serve_result) => serve_result.map_err(|e| anyhow::anyhow!(e)),
+            Err(_elapsed) => {
+                tracing::warn!(
+                    timeout_secs = HTTP_GRACEFUL_SHUTDOWN_TIMEOUT.as_secs(),
+                    "HTTP server graceful shutdown timed out; forcing close. Any open \
+                     keepalive connections or in-flight requests at this point will be \
+                     dropped."
+                );
+                Ok(())
+            }
+        };
 
         if let Err(error) = server_handle.stop() {
             // It could've been stopped already by axum shutdown.
             tracing::trace!(%error, "Failed to stop RPC server");
         };
-        // Wait till it actually stopped
-        server_handle.stopped().await;
+        // Wait until the jsonrpsee server task actually finishes. With WebSocket /
+        // long-poll RPC clients connected, `stopped()` can hang indefinitely; bound
+        // it the same way we bound axum's serve future above.
+        const RPC_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+        if (tokio::time::timeout(RPC_STOP_TIMEOUT, server_handle.stopped()).await).is_err() {
+            tracing::warn!(
+                timeout_secs = RPC_STOP_TIMEOUT.as_secs(),
+                "RPC server stopped() timed out; proceeding with shutdown anyway. \
+                 Long-running RPC subscriptions / WebSocket clients will be dropped."
+            );
+        }
 
         result
     });

@@ -255,11 +255,16 @@ impl BlobsCache {
             .collect()
     }
 
-    // Ensure that the provided batch number is wihin the range of sequence numbers that might plausibly be needed for replay.
+    // Ensure that the provided batch number is wihin the range of sequence numbers
+    // that might plausibly be needed for replay. Returns `true` if the number is in
+    // range; returns `false` (and logs an error) if the cache state looks corrupted
+    // relative to the requested number, which is recoverable but indicates a prior
+    // crash-during-batch (see comment inside).
+    #[must_use]
     fn sanity_check_batch_sequence_number_is_in_range(
         &self,
         batch_sequence_number: SequenceNumber,
-    ) {
+    ) -> bool {
         // The highest allowed sequence number is either the in-progress batch sequence number (if one exists) or the next sequence number (if no batch is in progress).
         // If no batch is in progress *and* we don't have any completed blobs in cache, we don't know what the next sequence number should be so we allow any value.
         let highest_allowed_sequence_number = self
@@ -288,8 +293,32 @@ impl BlobsCache {
                     .unwrap_or(0)
             });
 
-        assert!(batch_sequence_number <= highest_allowed_sequence_number, "The requested batch sequence number {batch_sequence_number} is greater than the highest allowed sequence number {highest_allowed_sequence_number}. This is a bug, please report it.");
-        assert!(batch_sequence_number >= lowest_allowed_sequence_number, "The requested batch sequence number {batch_sequence_number} is less than the lowest allowed sequence number {lowest_allowed_sequence_number}. This is a bug, please report it.");
+        if batch_sequence_number > highest_allowed_sequence_number
+            || batch_sequence_number < lowest_allowed_sequence_number
+        {
+            // The chain has seen this assertion fire when a sequencer was force-killed
+            // (SIGKILL or systemd timeout) mid-batch and the local sequencer state ended
+            // up with a `next_unassigned_sequence_number` ahead of what DA had actually
+            // confirmed. The panic was unrecoverable except by manually wiping the
+            // sequencer's RocksDB / clearing the Postgres `in_progress_batch` row.
+            //
+            // We've moved that recovery into `initial_data` (boot-time detection +
+            // automatic clear of stale in-progress batches). This early-return is the
+            // defense-in-depth path for any other corner that ends up here with stale
+            // state. Returning early lets the caller proceed with no replay proofs;
+            // the boot-time reset will correct the sequence number on the next sync
+            // cycle.
+            tracing::error!(
+                batch_sequence_number,
+                highest_allowed_sequence_number,
+                lowest_allowed_sequence_number,
+                "sequencer cache state inconsistent with requested batch sequence number; \
+                 returning no replay proofs. If this fires outside of a known-crash recovery, \
+                 please report as a bug at https://github.com/Sovereign-Labs/sovereign-sdk-wip.",
+            );
+            return false;
+        }
+        true
     }
 
     /// Fetch all proofs that need to be played at the start of the batch with the given sequence number.
@@ -297,7 +326,15 @@ impl BlobsCache {
         &self,
         target_batch_sequence_number: SequenceNumber,
     ) -> Vec<PreferredProofToReplay> {
-        self.sanity_check_batch_sequence_number_is_in_range(target_batch_sequence_number);
+        if !self.sanity_check_batch_sequence_number_is_in_range(target_batch_sequence_number) {
+            // Cache is inconsistent with the requested sequence number; the sanity
+            // check has already logged the error. Returning empty here is the
+            // recoverable equivalent of "no proofs to replay before this batch".
+            // The boot-time stale-in-progress recovery in `initial_data` will reset
+            // the sequence number on the next sync; this prevents the panic and
+            // unblocks the recovery path.
+            return Vec::new();
+        }
 
         let mut output = Vec::new();
         // Given the sequence number of a batch, we want to return all proofs with sequence numbers between the previous batch and the requested batch.
@@ -603,6 +640,35 @@ impl PreferredSequencerDb {
                         .into_iter()
                         .map(|blob| (blob.sequence_number(), blob))
                         .collect();
+
+                    // Detect a stale `in_progress_batch` row in Postgres: if its
+                    // sequence number is more than one ahead of the last DA-confirmed
+                    // batch, the leader that wrote it crashed before the batch could
+                    // be submitted to DA. The in-flight transactions in that batch
+                    // never reached consensus, so the safe recovery is to discard the
+                    // stale row and let the new leader start fresh from
+                    // `last_completed + 1`. The next `begin_rollup_block` will
+                    // overwrite the row via `ON CONFLICT (singleton) DO UPDATE`.
+                    //
+                    // Without this, a forced kill of the leader would leave the
+                    // Postgres `in_progress_batch.sequence_number` ahead of DA's
+                    // confirmed view, and `proofs_for_replay` would panic on the
+                    // first new batch attempt (chain#435 incident, 2026-05-20).
+                    let last_completed = completed_blobs.keys().next_back().copied();
+                    let in_progress_batch = match (last_completed, &in_progress_batch) {
+                        (Some(last), Some(batch)) if batch.sequence_number > last + 1 => {
+                            tracing::warn!(
+                                stale_in_progress = batch.sequence_number,
+                                last_completed_on_da = last,
+                                "Postgres `in_progress_batch` is ahead of last DA-confirmed batch; \
+                                 the writing leader likely crashed before submitting. Discarding the \
+                                 stale in-progress batch and resuming from sequence number {}.",
+                                last + 1,
+                            );
+                            None
+                        }
+                        _ => in_progress_batch,
+                    };
 
                     let sequence_number_of_next_blob =
                         match (completed_blobs.keys().next_back(), &in_progress_batch) {

@@ -428,7 +428,7 @@ mod tests {
 
         let (shutdown_snd, _shutdown_rcv) = watch::channel(());
         let (mut sync_task, start_replica_task_notifier) =
-            ReplicaSyncTask::new_with_page_size(shutdown_snd, 2, SequencerRole::PgSyncReplica)
+            ReplicaSyncTask::new_with_page_size(shutdown_snd, 2, AtomicSequencerRole::new(SequencerRole::PgSyncReplica))
                 .await
                 .unwrap();
 
@@ -492,7 +492,7 @@ mod tests {
 
         let (shutdown_snd, _shutdown_rcv) = watch::channel(());
         let (mut sync_task, start_replica_task_notifier) =
-            ReplicaSyncTask::new_with_page_size(shutdown_snd, 8, SequencerRole::PgSyncReplica)
+            ReplicaSyncTask::new_with_page_size(shutdown_snd, 8, AtomicSequencerRole::new(SequencerRole::PgSyncReplica))
                 .await
                 .unwrap();
 

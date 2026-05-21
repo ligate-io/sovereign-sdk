@@ -1,22 +1,62 @@
 use std::collections::VecDeque;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
+use sov_blob_sender::BlobExecutionStatus;
+use sov_full_node_configs::sequencer::PostgresConfig;
 use sov_modules_api::{ConcurrentStateCheckpoint, Runtime, Spec, StateCheckpoint};
 use sov_rollup_interface::node::da::DaService;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
-use tracing::{debug, enabled, error, warn, Level};
+use tracing::{debug, enabled, error, info, warn, Level};
 
 use super::executor_events::ExecutorEvent;
 use crate::metrics::PreferredSequencerExecutorEventMetrics;
-use crate::preferred::db::BatchToStore;
+use crate::preferred::db::postgres::PostgresBackend;
+use crate::preferred::db::{BatchToStore, DbBackend, SequencerRole};
 use crate::preferred::executor_events::AcceptedTxEventContents;
 use crate::preferred::transaction_subscriptions::TxResultWriter;
 use crate::preferred::{
     exit_rollup, LedgerDb, PreferredBlobSender, PreferredSequencerDb, ReadBatch, ReadBlob,
-    RecoveryStrategy, RECOVERY_ERROR_MESSAGE_ON_NONE_STRATEGY,
+    RecoveryStrategy, TxStatusManager, RECOVERY_ERROR_MESSAGE_ON_NONE_STRATEGY,
 };
+
+/// Inputs that [`SideEffectsTask`] stashes at construction so it can lazily
+/// build the leader-only state (Postgres backend + blob sender) when an
+/// in-process role transition arrives via [`RoleTransitionRequest::Promote`].
+/// Cloned per request.
+pub(super) struct LeaderConstructionDeps<Da: DaService> {
+    pub da: Da,
+    pub ledger_db: LedgerDb,
+    pub storage_path: PathBuf,
+    pub tx_status_manager: TxStatusManager<Da::Spec>,
+    pub blob_processing_timeout: Duration,
+    pub blob_status_channel: broadcast::Sender<BlobExecutionStatus<Da::Spec>>,
+    pub postgres_config: Option<PostgresConfig>,
+    pub bind_addr: SocketAddr,
+}
+
+/// Request envelope sent from the
+/// [`SynchronizedSequencerState`](crate::preferred::sync_sequencer_state::SynchronizedSequencerState)
+/// actor to the [`SideEffectsTask`] when an in-process role transition is
+/// occurring.
+pub(super) enum RoleTransitionRequest {
+    /// Build leader-only state (Postgres backend + blob sender) and swap it
+    /// into `self.db.backend` / `self.blob_sender`. Confirm via the embedded
+    /// oneshot.
+    Promote {
+        confirm: oneshot::Sender<anyhow::Result<()>>,
+    },
+    /// Drop leader-only state. Sets `db.backend = None` and the blob sender's
+    /// `inner` to `None`; the dropped `BlobSender` task gets its cancellation
+    /// signal naturally when its owning struct drops.
+    Demote {
+        confirm: oneshot::Sender<anyhow::Result<()>>,
+    },
+}
 
 /// A task that runs in the background and handles side effects of accepted transactions.
 pub(super) struct SideEffectsTask<S, Rt, Da>
@@ -32,6 +72,13 @@ where
     pub executor_events_receiver: mpsc::Receiver<ExecutorEvent<S, Rt>>,
     pub shutdown_sender: watch::Sender<()>,
     pub transaction_cache: TxResultWriter<S, Rt>,
+    /// Lazy-construction inputs for leader-side state. The actor sends a
+    /// [`RoleTransitionRequest`] through `role_transition_rx`; the handler
+    /// uses these inputs to build a fresh `PostgresBackend` + `BlobSender`.
+    pub leader_construction_deps: LeaderConstructionDeps<Da>,
+    /// In-process role transition requests from the sequencer state actor
+    /// (see `sync_sequencer_state::SynchronizedSequencerState::process_promote_to_leader`).
+    pub role_transition_rx: mpsc::Receiver<RoleTransitionRequest>,
 }
 
 impl<S, Rt, Da> SideEffectsTask<S, Rt, Da>
@@ -312,39 +359,141 @@ where
         Ok(())
     }
 
-    async fn receive_and_process_events(
-        &mut self,
-        mut event_queue: VecDeque<ExecutorEvent<S, Rt>>,
-        max_queue_size: usize,
-    ) {
-        while let Some(event) = self.executor_events_receiver.recv().await {
-            event_queue.push_back(event);
-            while event_queue.len() < max_queue_size {
-                if let Ok(event) = self.executor_events_receiver.try_recv() {
-                    event_queue.push_back(event);
-                } else {
-                    break;
+    /// In-process role-transition handler (chain#435 Bug 3 Phase 3). Builds or
+    /// drops the leader-only side-effects (Postgres backend, blob sender) in
+    /// response to a Promote / Demote request from the
+    /// [`SequencerStateUpdator`](crate::preferred::sync_sequencer_state::SequencerStateUpdator)
+    /// actor. The actor flips `Inner::seq_role` atomically only after this
+    /// handler confirms; otherwise a freshly-promoted "leader" would have a
+    /// stale `db.backend = None` and silently fail every write.
+    async fn handle_role_transition(&mut self, req: RoleTransitionRequest) {
+        match req {
+            RoleTransitionRequest::Promote { confirm } => {
+                let outcome = self.do_promote().await;
+                if let Err(ref err) = outcome {
+                    error!(?err, "in-process Promote handler failed in SideEffectsTask");
                 }
+                let _ = confirm.send(outcome);
             }
-
-            while !event_queue.is_empty() {
-                if let Err(e) = self.handle_executor_event(&mut event_queue).await {
-                    tracing::error!(error = ?e, "Error handling executor event");
-                    // If we've already started shutting down, this might fail - but then we're happy.
-                    let _ = self.shutdown_sender.send(());
-                    break;
-                }
+            RoleTransitionRequest::Demote { confirm } => {
+                let outcome = self.do_demote().await;
+                let _ = confirm.send(outcome);
             }
         }
+    }
+
+    async fn do_promote(&mut self) -> anyhow::Result<()> {
+        let deps = &self.leader_construction_deps;
+        let postgres_config = deps
+            .postgres_config
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!(
+                "Promote requested but no postgres_config is configured; this node was \
+                 not initialized as a DbElected sequencer."
+            ))?;
+
+        // 1. Build a fresh Postgres backend. Migrations in `connect` are
+        // idempotent (sqlx::migrate! is gated by _sqlx_migrations table state),
+        // so this is safe even when other nodes have run them already.
+        info!("Promote: connecting Postgres backend...");
+        let backend = PostgresBackend::connect(&postgres_config, deps.bind_addr).await?;
+
+        // 2. Read the completed-blob snapshot so the blob sender's recovery
+        // pass has the same starting point as a leader-from-startup would.
+        let snapshot = match backend.current_data().await {
+            Ok(s) => s,
+            Err(err) => {
+                return Err(anyhow::anyhow!(
+                    "Promote: failed to read SnapshotData from new backend: {err:?}"
+                ));
+            }
+        };
+        let all_completed_blobs = snapshot.completed_blobs.clone();
+
+        // 3. Build the blob sender's leader-side inner. Constructed with the
+        // same args as `PreferredBlobSender::new`'s `BatchProducer` branch,
+        // routed through `activate_leader_state` so the existing
+        // `nb_of_concurrent_*` atomic counters are preserved.
+        info!(
+            num_blobs_for_recovery = all_completed_blobs.len(),
+            "Promote: activating leader-side blob sender..."
+        );
+        let blob_sender_handle = self
+            .blob_sender
+            .activate_leader_state(
+                deps.da.clone(),
+                deps.ledger_db.clone(),
+                all_completed_blobs,
+                deps.storage_path.clone().into_boxed_path(),
+                deps.tx_status_manager.clone(),
+                self.shutdown_sender.clone(),
+                deps.blob_processing_timeout,
+                deps.blob_status_channel.clone(),
+            )
+            .await?;
+
+        // 4. Hot-swap the backend into the sequencer DB.
+        self.db.set_backend(Some(Box::new(backend)));
+
+        // 5. The BlobSender task we just spawned isn't tracked in the standard
+        // background_handles vec (those were collected at startup). It lives
+        // until the global shutdown_sender fires. That's fine for our use case:
+        // shutdown propagates through the same channel.
+        let _ = blob_sender_handle;
+
+        info!("Promote: leader-side state activated.");
+        Ok(())
+    }
+
+    async fn do_demote(&mut self) -> anyhow::Result<()> {
+        info!("Demote: tearing down leader-side state...");
+        self.db.set_backend(None);
+        self.blob_sender.deactivate_leader_state();
+        info!("Demote: leader-side state torn down.");
+        Ok(())
     }
 
     pub(crate) fn spawn(mut self) -> JoinHandle<()> {
         // We use a queue so that we can batch insert txs.
         let max_queue_size = self.executor_events_receiver.max_capacity();
-        let event_queue = VecDeque::with_capacity(max_queue_size);
+        let mut event_queue = VecDeque::with_capacity(max_queue_size);
         tokio::spawn(async move {
-            self.receive_and_process_events(event_queue, max_queue_size)
-                .await;
+            loop {
+                tokio::select! {
+                    // Bias toward role transitions so a Promote / Demote is
+                    // handled before the next batch of executor events. This
+                    // matters because the events queue can run hot and starve
+                    // the actor's confirm-await for tens of seconds otherwise.
+                    biased;
+
+                    Some(req) = self.role_transition_rx.recv() => {
+                        self.handle_role_transition(req).await;
+                    }
+
+                    event_opt = self.executor_events_receiver.recv() => {
+                        let Some(event) = event_opt else {
+                            // Sender closed — the rollup is shutting down.
+                            break;
+                        };
+                        event_queue.push_back(event);
+                        // Drain more events without blocking.
+                        while event_queue.len() < max_queue_size {
+                            if let Ok(event) = self.executor_events_receiver.try_recv() {
+                                event_queue.push_back(event);
+                            } else {
+                                break;
+                            }
+                        }
+                        while !event_queue.is_empty() {
+                            if let Err(e) = self.handle_executor_event(&mut event_queue).await {
+                                tracing::error!(error = ?e, "Error handling executor event");
+                                let _ = self.shutdown_sender.send(());
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         })
     }
 }

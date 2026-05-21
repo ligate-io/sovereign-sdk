@@ -196,6 +196,9 @@ impl<S: Spec, Rt: Runtime<S>> Message<S, Rt> {
 
 pub(crate) fn create<S, Rt>(
     seq_role: AtomicSequencerRole,
+    role_transition_tx: Option<
+        mpsc::Sender<crate::preferred::side_effects::RoleTransitionRequest>,
+    >,
     latest_info: StateUpdateInfo<S::Storage>,
     tx_queue_id: Arc<AtomicU64>,
     batch_execution_time_limit_micros: u64,
@@ -241,6 +244,7 @@ where
 
     let inner = Inner {
         seq_role,
+        role_transition_tx,
         executor,
         executor_rebase_height,
         latest_info,

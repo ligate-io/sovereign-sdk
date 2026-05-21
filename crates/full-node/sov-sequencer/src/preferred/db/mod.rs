@@ -641,6 +641,19 @@ pub struct PreferredSequencerDb {
 }
 
 impl PreferredSequencerDb {
+    /// Hot-swap the Postgres backend on an in-process role transition. Called
+    /// by [`crate::preferred::side_effects::SideEffectsTask`] when it receives
+    /// a Promote / Demote request from the actor (chain#435 Bug 3). All write
+    /// methods (`bulk_insert_txs`, `start_batch`, `terminate_batch`, etc.)
+    /// already gate on `if let Some(backend) = &self.backend`, so a `None`
+    /// backend turns the DB methods into silent no-ops; this matches the
+    /// pre-Bug-3 replica behavior.
+    pub(crate) fn set_backend(&mut self, backend: Option<Box<dyn DbBackend>>) {
+        self.backend = backend;
+    }
+}
+
+impl PreferredSequencerDb {
     pub(crate) async fn new(
         shutdown_sender: watch::Sender<()>,
         storage_path: &Path,

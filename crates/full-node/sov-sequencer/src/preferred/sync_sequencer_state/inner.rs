@@ -80,6 +80,15 @@ where
     /// `SequencerStateUpdator` actor (single-writer invariant; enforced by
     /// convention, not by the type).
     pub(crate) seq_role: AtomicSequencerRole,
+    /// Channel to the [`SideEffectsTask`](crate::preferred::side_effects::SideEffectsTask)
+    /// for requesting in-process role transitions. The
+    /// `process_promote_to_leader` / `process_demote_to_replica` handlers send
+    /// a [`RoleTransitionRequest`](crate::preferred::side_effects::RoleTransitionRequest)
+    /// here and await the embedded oneshot confirmation before flipping
+    /// `seq_role` atomically. `None` for test harnesses / non-sequencer setups.
+    pub(crate) role_transition_tx: Option<
+        tokio::sync::mpsc::Sender<crate::preferred::side_effects::RoleTransitionRequest>,
+    >,
     pub(crate) seq_config: SequencerConfig<S::Address, PreferredSequencerConfig<S::Address>>,
     pub(crate) shutdown_receiver: watch::Receiver<()>,
     pub(crate) shutdown_sender: watch::Sender<()>,

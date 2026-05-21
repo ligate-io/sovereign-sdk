@@ -105,6 +105,13 @@ where
         let (next_sequence_number, db_cache) = db.initial_data().await?;
         let mut handles = vec![];
 
+        // Save the DA service handle for the LeaderConstructionDeps stash on
+        // SideEffectsTask. `PreferredBlobSender::new` consumes `self.da` by
+        // value (then internally clones for the spawned task); we need a
+        // parallel clone for the in-process promote path.
+        let da_for_leader_deps = self.da.clone();
+        let blob_processing_timeout = Duration::from_secs(config.blob_processing_timeout_secs);
+
         let (blob_sender, blob_sender_handle) = PreferredBlobSender::new(
             self.da,
             ledger_db.clone(),
@@ -112,7 +119,7 @@ where
             storage_path.into(),
             tx_status_manager.clone(),
             shutdown_sender.clone(),
-            Duration::from_secs(config.blob_processing_timeout_secs),
+            blob_processing_timeout,
             blobs_sender_channel.clone(),
             seq_role,
         )
@@ -166,11 +173,19 @@ where
         let (mut replica_task, start_replica_task_notifier) =
             ReplicaSyncTask::new(shutdown_sender.clone(), seq_role_atomic.clone()).await?;
 
+        // Channel for in-process role-transition coordination between the
+        // SequencerStateUpdator actor and the SideEffectsTask. Buffer 4 because
+        // these are rare events (one per Promote/Demote) and we don't want any
+        // ordering surprises if two transitions land back-to-back.
+        let (role_transition_tx, role_transition_rx) =
+            mpsc::channel::<crate::preferred::side_effects::RoleTransitionRequest>(4);
+
         let tx_queue_id = Arc::new(AtomicU64::new(0));
         let batch_execution_time_limit_micros =
             preferred_config.batch_execution_time_limit_millis * 1000;
         let (synchronized_state, synchronized_state_updator) = create(
             seq_role_atomic.clone(),
+            Some(role_transition_tx),
             latest_state_update.clone(),
             tx_queue_id.clone(),
             batch_execution_time_limit_micros,
@@ -206,6 +221,20 @@ where
             api_ledger_db,
             shutdown_sender: shutdown_sender.clone(),
             transaction_cache: cached_txs.write_handle(),
+            // Stash the construction inputs the promote handler needs to build
+            // a fresh PostgresBackend + activate the blob sender on in-process
+            // role transition.
+            leader_construction_deps: crate::preferred::side_effects::LeaderConstructionDeps {
+                da: da_for_leader_deps,
+                ledger_db: ledger_db.clone(),
+                storage_path: storage_path.to_path_buf(),
+                tx_status_manager: tx_status_manager.clone(),
+                blob_processing_timeout,
+                blob_status_channel: blobs_sender_channel.clone(),
+                postgres_config: preferred_config.postgres_config.clone(),
+                bind_addr,
+            },
+            role_transition_rx,
         }
         .spawn();
         handles.push(side_effects_task);

@@ -442,27 +442,77 @@ where
         let mut inner = self.get_inner_with_timing(reason).await;
         let previous = inner.seq_role.load();
         if previous == SequencerRole::BatchProducer {
-            tracing::warn!(
-                "PromoteToLeader received but role is already BatchProducer; no-op."
-            );
+            tracing::warn!("PromoteToLeader received but role is already BatchProducer; no-op.");
             drop(inner);
             let _ = confirm.send(Ok(()));
             return;
         }
-        tracing::info!(
-            ?previous,
-            "in-process role transition: PromoteToLeader (Phase 2 — atomic flip only; \
-             Phase 3 will additionally activate backend + blob sender). This replaces \
-             the pre-Bug-3 'exit to restart as leader' pattern."
-        );
-        inner.seq_role.store(SequencerRole::BatchProducer);
+        let role_tx = inner.role_transition_tx.clone();
         drop(inner);
-        let _ = confirm.send(Ok(()));
+
+        // Side-effects activation (Phase 3): build PostgresBackend + activate
+        // blob sender BEFORE flipping the atomic. This avoids a window where
+        // `seq_role == BatchProducer` but `db.backend == None`, during which
+        // `process_accept_tx` would treat the node as a leader and silently
+        // drop writes against the empty backend.
+        let Some(role_tx) = role_tx else {
+            tracing::warn!(
+                "PromoteToLeader: no role_transition_tx wired; flipping atomic only \
+                 (test-harness path). Backend / blob sender remain in their replica state."
+            );
+            let mut inner = self.get_inner_with_timing("promote_no_side_effects").await;
+            inner.seq_role.store(SequencerRole::BatchProducer);
+            drop(inner);
+            let _ = confirm.send(Ok(()));
+            return;
+        };
+
+        let (side_effects_tx, side_effects_rx) = oneshot::channel();
+        if let Err(err) = role_tx
+            .send(crate::preferred::side_effects::RoleTransitionRequest::Promote {
+                confirm: side_effects_tx,
+            })
+            .await
+        {
+            let _ = confirm.send(Err(anyhow::anyhow!(
+                "PromoteToLeader: side-effects channel closed: {err}"
+            )));
+            return;
+        }
+
+        let outcome = match side_effects_rx.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => Err(anyhow::anyhow!(
+                "PromoteToLeader: SideEffectsTask returned error: {err:?}"
+            )),
+            Err(_) => Err(anyhow::anyhow!(
+                "PromoteToLeader: SideEffectsTask dropped the confirm channel"
+            )),
+        };
+        if outcome.is_ok() {
+            // Atomic flip only after side effects succeeded; readers (HTTP
+            // handlers, update_state loop) now see BatchProducer with backend
+            // populated.
+            let inner = self
+                .get_inner_with_timing("promote_to_leader_post_side_effects")
+                .await;
+            tracing::info!(?previous, "in-process role transition: PromoteToLeader complete");
+            inner.seq_role.store(SequencerRole::BatchProducer);
+            drop(inner);
+        } else {
+            tracing::error!(
+                ?outcome,
+                "PromoteToLeader: side-effects activation failed; role not flipped. \
+                 The heartbeat task will retry on the next interval."
+            );
+        }
+        let _ = confirm.send(outcome);
     }
 
-    /// In-process Leader → Replica transition. Phase 2 implementation: just flips
-    /// the atomic role. Phase 4 will extend this to drop the Postgres backend +
-    /// blob sender and re-spawn the replica sync task.
+    /// In-process Leader → Replica transition. Phase 4: drops the leader-only
+    /// side effects (db.backend, blob_sender.inner) AFTER flipping the atomic
+    /// so any new write attempts short-circuit on the replica role before they
+    /// can reach the soon-to-be-None backend.
     ///
     /// Idempotent: a no-op if the current role is already `PgSyncReplica`.
     async fn process_demote_to_replica(
@@ -473,21 +523,49 @@ where
         let mut inner = self.get_inner_with_timing(reason).await;
         let previous = inner.seq_role.load();
         if previous == SequencerRole::PgSyncReplica {
-            tracing::warn!(
-                "DemoteToReplica received but role is already PgSyncReplica; no-op."
-            );
+            tracing::warn!("DemoteToReplica received but role is already PgSyncReplica; no-op.");
             drop(inner);
             let _ = confirm.send(Ok(()));
             return;
         }
-        tracing::info!(
-            ?previous,
-            "in-process role transition: DemoteToReplica (Phase 2 — atomic flip only; \
-             Phase 4 will drop leader-side state)."
-        );
+        tracing::info!(?previous, "in-process role transition: DemoteToReplica");
         inner.seq_role.store(SequencerRole::PgSyncReplica);
+        // Clear in-memory open batch state. Postgres's is_leader($n) gate
+        // already rejects further writes; this just keeps local state honest.
+        inner.sequence_number_of_open_batch = None;
+        let role_tx = inner.role_transition_tx.clone();
         drop(inner);
-        let _ = confirm.send(Ok(()));
+
+        let Some(role_tx) = role_tx else {
+            tracing::warn!(
+                "DemoteToReplica: no role_transition_tx wired; atomic flipped only."
+            );
+            let _ = confirm.send(Ok(()));
+            return;
+        };
+
+        let (side_effects_tx, side_effects_rx) = oneshot::channel();
+        if let Err(err) = role_tx
+            .send(crate::preferred::side_effects::RoleTransitionRequest::Demote {
+                confirm: side_effects_tx,
+            })
+            .await
+        {
+            let _ = confirm.send(Err(anyhow::anyhow!(
+                "DemoteToReplica: side-effects channel closed: {err}"
+            )));
+            return;
+        }
+        let outcome = match side_effects_rx.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => Err(anyhow::anyhow!(
+                "DemoteToReplica: SideEffectsTask returned error: {err:?}"
+            )),
+            Err(_) => Err(anyhow::anyhow!(
+                "DemoteToReplica: SideEffectsTask dropped the confirm channel"
+            )),
+        };
+        let _ = confirm.send(outcome);
     }
 
     #[tracing::instrument(skip_all, level = "debug")]

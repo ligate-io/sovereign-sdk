@@ -27,6 +27,52 @@ pub struct PreferredBlobSender<Da: DaService> {
 }
 
 impl<Da: DaService> PreferredBlobSender<Da> {
+    /// In-process activation of leader-side blob submission. Mirrors `Self::new`'s
+    /// `BatchProducer` branch but operates on an already-constructed (replica)
+    /// instance. Used by [`crate::preferred::side_effects::SideEffectsTask`] when
+    /// it receives a [`crate::preferred::side_effects::RoleTransitionRequest::Promote`].
+    ///
+    /// Returns the `JoinHandle` for the spawned `BlobSender` task so the caller
+    /// can track it for shutdown. No-op if `inner` is already `Some`.
+    pub(crate) async fn activate_leader_state(
+        &mut self,
+        da: Da,
+        ledger_db: LedgerDb,
+        all_completed_blobs: Vec<ReadBlob>,
+        storage_path: Box<Path>,
+        tx_status_manager: TxStatusManager<Da::Spec>,
+        shutdown_sender: watch::Sender<()>,
+        blob_processing_timeout: Duration,
+        blobs_sender_channel: broadcast::Sender<BlobExecutionStatus<Da::Spec>>,
+    ) -> anyhow::Result<Option<JoinHandle<()>>> {
+        if self.inner.is_some() {
+            return Ok(None);
+        }
+        let blobs_to_send = create_blobs_to_send(all_completed_blobs)?;
+        let (inner, blob_sender_handle) = BlobSender::new(
+            da.clone(),
+            ledger_db,
+            storage_path.as_ref(),
+            TxStatusBlobSenderHooks::new(tx_status_manager.clone()),
+            shutdown_sender,
+            blob_processing_timeout,
+            Some(blobs_sender_channel),
+            blobs_to_send,
+            self.nb_of_concurrent_batch_blob_submissions.clone(),
+            self.nb_of_concurrent_proof_blob_submissions.clone(),
+        )
+        .await?;
+        self.inner = Some(inner);
+        Ok(Some(blob_sender_handle))
+    }
+
+    /// Symmetric tear-down. Sets `inner` to `None`; the dropped `BlobSender`'s
+    /// own background task observes the drop via its shutdown plumbing and
+    /// exits. Idempotent; no-op if already `None`.
+    pub(crate) fn deactivate_leader_state(&mut self) {
+        self.inner = None;
+    }
+
     pub(crate) async fn new(
         da: Da,
         ledger_db: LedgerDb,

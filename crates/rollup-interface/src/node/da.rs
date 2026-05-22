@@ -89,11 +89,22 @@ impl<E> From<E> for MaybeRetryable<E> {
 }
 
 /// Output of submit blob operation.
+///
+/// Carries the identifiers a rollup needs to look the blob back up
+/// (`blob_hash`, `da_transaction_id`) plus the DA-layer cost the
+/// submission incurred (`fee_paid`, `gas_used`) and the on-wire blob
+/// size (`size_in_bytes`). The cost fields are `Option` because not
+/// every DA layer charges a fee or surfaces gas (e.g. the mock DA
+/// used in tests). Rollup metrics layers can fall back to a
+/// size-based estimate when `fee_paid` is `None`.
 #[derive(Debug, Clone, Serialize, Deserialize, derive_more::Display)]
 #[display(
-    "SubmitBlobReceipt {{ blob_hash: {}, da_transaction_id: {:?} }}",
+    "SubmitBlobReceipt {{ blob_hash: {}, da_transaction_id: {:?}, fee_paid: {:?}, gas_used: {:?}, size_in_bytes: {} }}",
     blob_hash,
-    da_transaction_id
+    da_transaction_id,
+    fee_paid,
+    gas_used,
+    size_in_bytes
 )]
 pub struct SubmitBlobReceipt<T: Debug + Clone> {
     /// Computed blob hash, so it can be identified by fetcher of the blobs.
@@ -101,6 +112,19 @@ pub struct SubmitBlobReceipt<T: Debug + Clone> {
     pub blob_hash: BlobHash,
     /// Identifier of the transaction on the DA layer.
     pub da_transaction_id: T,
+    /// Fee paid for this blob submission, in the DA layer's native
+    /// unit. For Celestia this is nanoTIA (1e-9 TIA). `None` when the
+    /// DA implementation doesn't surface a fee (e.g. mock DA in tests,
+    /// or a future fee-less Validium-style DA).
+    pub fee_paid: Option<u64>,
+    /// Gas used by the DA-layer tx (e.g. the PFB tx on Celestia).
+    /// `None` for DA layers that don't use a gas model.
+    pub gas_used: Option<u64>,
+    /// Size of the published blob in bytes, post-framing as posted to
+    /// the DA layer. Always populated. Useful for size-based cost
+    /// models when `fee_paid` is `None`, and for "GB posted per month"
+    /// dashboards regardless of fee model.
+    pub size_in_bytes: u64,
 }
 
 /// A DaService is the local side of an RPC connection talking to a node of the DA layer

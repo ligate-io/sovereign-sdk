@@ -174,9 +174,26 @@ impl CelestiaService {
             "Blob has been submitted to Celestia"
         );
 
+        // `tx_response.gas_used` is i64 from the proto-generated
+        // RawTxResponse; PFB gas is non-negative so the cast is safe.
+        // Treating an unexpected negative as a missing value (`None`)
+        // is safer than wrapping to a huge u64.
+        let gas_used = u64::try_from(tx_response.gas_used).ok();
+        // TODO(chain#452): also surface `fee_paid` (nanoTIA) by
+        // decoding `tx_response.tx: Option<Any>` into a Cosmos Tx
+        // and walking `auth_info.fee.amount` for the utia coin.
+        // For now leaving `None`; the chain metrics layer falls
+        // back to a constant estimate via `unwrap_or` so the
+        // existing `ligate_da_tia_burned_nano_estimate_total`
+        // counter keeps producing a sane number.
+        let fee_paid = None;
+        let size_in_bytes = bytes as u64;
         Ok(SubmitBlobReceipt {
             blob_hash,
             da_transaction_id: tx_hash,
+            fee_paid,
+            gas_used,
+            size_in_bytes,
         })
     }
 }

@@ -174,19 +174,20 @@ impl CelestiaService {
             "Blob has been submitted to Celestia"
         );
 
-        // `tx_response.gas_used` is i64 from the proto-generated
-        // RawTxResponse; PFB gas is non-negative so the cast is safe.
-        // Treating an unexpected negative as a missing value (`None`)
-        // is safer than wrapping to a huge u64.
-        let gas_used = u64::try_from(tx_response.gas_used).ok();
-        // TODO(chain#452): also surface `fee_paid` (nanoTIA) by
-        // decoding `tx_response.tx: Option<Any>` into a Cosmos Tx
-        // and walking `auth_info.fee.amount` for the utia coin.
-        // For now leaving `None`; the chain metrics layer falls
-        // back to a constant estimate via `unwrap_or` so the
-        // existing `ligate_da_tia_burned_nano_estimate_total`
-        // counter keeps producing a sane number.
+        // The celestia-grpc client returns `TxInfo { hash, height }`
+        // and discards the rest of the receipt — neither `gas_used`
+        // nor `fee_paid` is reachable from `tx_response` alone.
+        // Getting them requires a follow-up `get_tx` call against
+        // the DA node to fetch the full Cosmos `TxResponse`, then
+        // decoding `auth_info.fee.amount` for the utia coin.
+        //
+        // TODO(chain#452-followup): wire that follow-up lookup so
+        // `gas_used` and `fee_paid` become authoritative for Celestia.
+        // For now we surface only the on-wire size (always known) and
+        // let the chain-side metrics fall back to its compiled-in
+        // per-blob TIA estimate via `unwrap_or`.
         let fee_paid = None;
+        let gas_used = None;
         let size_in_bytes = bytes as u64;
         Ok(SubmitBlobReceipt {
             blob_hash,

@@ -116,14 +116,25 @@ pub struct SubmitBlobReceipt<T: Debug + Clone> {
     /// unit. For Celestia this is nanoTIA (1e-9 TIA). `None` when the
     /// DA implementation doesn't surface a fee (e.g. mock DA in tests,
     /// or a future fee-less Validium-style DA).
+    ///
+    /// `#[serde(default)]` so receipts persisted by older rollup
+    /// binaries (which didn't carry this field) deserialize cleanly
+    /// as `None` after upgrade. Without it, an upgrade panics on the
+    /// existing blob-sender RocksDB rows.
+    #[serde(default)]
     pub fee_paid: Option<u64>,
     /// Gas used by the DA-layer tx (e.g. the PFB tx on Celestia).
-    /// `None` for DA layers that don't use a gas model.
+    /// `None` for DA layers that don't use a gas model. See `fee_paid`
+    /// for the `#[serde(default)]` rationale.
+    #[serde(default)]
     pub gas_used: Option<u64>,
     /// Size of the published blob in bytes, post-framing as posted to
-    /// the DA layer. Always populated. Useful for size-based cost
-    /// models when `fee_paid` is `None`, and for "GB posted per month"
-    /// dashboards regardless of fee model.
+    /// the DA layer. New adapters always populate this; old persisted
+    /// receipts (pre-cost-fields) deserialize as `0` via
+    /// `#[serde(default)]` so an upgrade never panics on the existing
+    /// blob-sender DB. Rollup metrics layers should treat `0` as
+    /// "unknown" rather than "no data posted".
+    #[serde(default)]
     pub size_in_bytes: u64,
 }
 

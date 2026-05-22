@@ -388,6 +388,11 @@ impl DaService for MockDaService {
         let res = Ok(SubmitBlobReceipt {
             blob_hash: BlobHash::new(blob_hash.0),
             da_transaction_id: blob_hash,
+            // Mock DA has no fee or gas model. `size_in_bytes` is
+            // the raw blob length so size-based dashboards still work.
+            fee_paid: None,
+            gas_used: None,
+            size_in_bytes: blob_size_bytes as u64,
         });
 
         tx.send(res).unwrap();
@@ -406,6 +411,7 @@ impl DaService for MockDaService {
 
         tracing::debug!("Proof received. Buffering for later inclusion.");
 
+        let proof_size_bytes = proof.len();
         let proof_blob = self.make_blob(proof.to_vec());
         let blob_hash = proof_blob.hash();
 
@@ -416,6 +422,9 @@ impl DaService for MockDaService {
         let res = Ok(SubmitBlobReceipt {
             blob_hash: BlobHash::new(blob_hash.0),
             da_transaction_id: blob_hash,
+            fee_paid: None,
+            gas_used: None,
+            size_in_bytes: proof_size_bytes as u64,
         });
 
         tx.send(res).unwrap();

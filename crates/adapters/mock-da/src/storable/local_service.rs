@@ -563,6 +563,11 @@ impl StorableMockDaService {
         Ok(SubmitBlobReceipt {
             blob_hash: BlobHash::new(blob_hash.0),
             da_transaction_id: blob_hash,
+            // Mock DA has no fee or gas model. `size_in_bytes` is
+            // the raw blob length so size-based dashboards still work.
+            fee_paid: None,
+            gas_used: None,
+            size_in_bytes: blob.len() as u64,
         })
     }
 
@@ -602,6 +607,9 @@ impl StorableMockDaService {
         Ok(SubmitBlobReceipt {
             blob_hash: BlobHash::new(blob_hash.0),
             da_transaction_id: blob_hash,
+            fee_paid: None,
+            gas_used: None,
+            size_in_bytes: aggregated_proof_data.len() as u64,
         })
     }
 

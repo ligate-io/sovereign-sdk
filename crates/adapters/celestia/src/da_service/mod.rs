@@ -174,9 +174,27 @@ impl CelestiaService {
             "Blob has been submitted to Celestia"
         );
 
+        // The celestia-grpc client returns `TxInfo { hash, height }`
+        // and discards the rest of the receipt — neither `gas_used`
+        // nor `fee_paid` is reachable from `tx_response` alone.
+        // Getting them requires a follow-up `get_tx` call against
+        // the DA node to fetch the full Cosmos `TxResponse`, then
+        // decoding `auth_info.fee.amount` for the utia coin.
+        //
+        // TODO(chain#452-followup): wire that follow-up lookup so
+        // `gas_used` and `fee_paid` become authoritative for Celestia.
+        // For now we surface only the on-wire size (always known) and
+        // let the chain-side metrics fall back to its compiled-in
+        // per-blob TIA estimate via `unwrap_or`.
+        let fee_paid = None;
+        let gas_used = None;
+        let size_in_bytes = bytes as u64;
         Ok(SubmitBlobReceipt {
             blob_hash,
             da_transaction_id: tx_hash,
+            fee_paid,
+            gas_used,
+            size_in_bytes,
         })
     }
 }

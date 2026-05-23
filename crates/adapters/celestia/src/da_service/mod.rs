@@ -33,12 +33,47 @@ use sov_rollup_interface::node::da::{
     run_maybe_retryable_async_fn_with_retries, DaService, MaybeRetryable, SubmitBlobReceipt,
 };
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tracing::instrument;
 
 type BoxError = anyhow::Error;
+
+// ────────────────────────────────────────────────────────────────────
+// PFB fee estimation constants.
+//
+// Until celestiaorg/lumina#974 lands and exposes `get_tx` on
+// `StateApi`, we can't read the real `gas_used` + fee from the PFB
+// receipt. Compute a per-blob estimate from the live `gas_price`
+// (already polled by `stat_collection_task`) times a calibrated gas
+// usage. The result fills `SubmitBlobReceipt::fee_paid` with a number
+// that tracks real Mocha cost much more closely than a fixed
+// per-blob constant.
+//
+// The two gas constants below are empirical against Mocha for our
+// attestation-shaped payloads; replace with authoritative values
+// when the upstream `get_tx` API ships.
+// ────────────────────────────────────────────────────────────────────
+
+/// Base gas cost for a PFB tx envelope, independent of blob size.
+/// Covers sig verification, account read, and the static PFB-message
+/// overhead. Calibrated against Mocha 2026-05-22.
+const PFB_BASE_GAS: u64 = 75_000;
+
+/// Marginal gas per byte of blob payload, on top of `PFB_BASE_GAS`.
+const PFB_GAS_PER_BYTE: u64 = 8;
+
+/// Default gas price (utia per gas) used until the first periodic
+/// stat poll populates the live value. Same calibration source as
+/// the gas constants above.
+const DEFAULT_GAS_PRICE_UTIA_PER_GAS: f64 = 0.004;
+
+/// Convert utia (the Celestia base unit) to nanoTIA, which is the
+/// unit our chain metric (`ligate_da_tia_burned_nano_estimate_total`)
+/// counts in. 1 TIA = 1e6 utia = 1e9 nanoTIA, so 1 utia = 1000 nanoTIA.
+const NANO_TIA_PER_UTIA: u64 = 1_000;
 
 #[derive(Debug, Clone)]
 pub struct CelestiaService {
@@ -51,6 +86,13 @@ pub struct CelestiaService {
     request_timeout: Duration,
     tx_priority: celestia_client::tx::TxPriority,
     tx_status_polling_millis: u64,
+    /// Live Mocha gas-price estimate (utia per gas), stored as
+    /// `f64::to_bits` so the periodic stat task can publish without
+    /// taking a lock and `submit_blob_to_namespace` can read it
+    /// directly. Populated by `stat_collection_task` on each
+    /// successful poll; reads before the first poll get
+    /// `DEFAULT_GAS_PRICE_UTIA_PER_GAS`.
+    gas_price_estimate_utia_per_gas: Arc<AtomicU64>,
 }
 
 impl CelestiaService {
@@ -64,6 +106,7 @@ impl CelestiaService {
         request_timeout: Duration,
         tx_priority: celestia_client::tx::TxPriority,
         tx_status_polling_millis: u64,
+        gas_price_estimate_utia_per_gas: Arc<AtomicU64>,
     ) -> Self {
         Self {
             client: Arc::new(client),
@@ -75,6 +118,7 @@ impl CelestiaService {
             request_timeout,
             tx_priority,
             tx_status_polling_millis,
+            gas_price_estimate_utia_per_gas,
         }
     }
 
@@ -174,19 +218,29 @@ impl CelestiaService {
             "Blob has been submitted to Celestia"
         );
 
-        // The celestia-grpc client returns `TxInfo { hash, height }`
-        // and discards the rest of the receipt — neither `gas_used`
-        // nor `fee_paid` is reachable from `tx_response` alone.
-        // Getting them requires a follow-up `get_tx` call against
-        // the DA node to fetch the full Cosmos `TxResponse`, then
-        // decoding `auth_info.fee.amount` for the utia coin.
-        //
-        // TODO(chain#452-followup): wire that follow-up lookup so
-        // `gas_used` and `fee_paid` become authoritative for Celestia.
-        // For now we surface only the on-wire size (always known) and
-        // let the chain-side metrics fall back to its compiled-in
-        // per-blob TIA estimate via `unwrap_or`.
-        let fee_paid = None;
+        // `fee_paid` estimate. The celestia-grpc client returns
+        // `TxInfo { hash, height }` and discards the rest of the
+        // receipt, so we can't read the authoritative `gas_used` +
+        // fee. While celestiaorg/lumina#974 (exposes `get_tx` on
+        // `StateApi`) sits in review, compute an estimate from the
+        // live `gas_price` (refreshed periodically by
+        // `stat_collection_task`) and a calibrated per-blob gas
+        // model. Better than the chain's compiled-in per-blob
+        // constant, especially as blob sizes grow; flips to
+        // authoritative the moment the upstream API lands.
+        let gas_price_utia_per_gas = f64::from_bits(
+            self.gas_price_estimate_utia_per_gas.load(Ordering::Relaxed),
+        );
+        let estimated_gas = PFB_BASE_GAS.saturating_add(
+            (bytes as u64).saturating_mul(PFB_GAS_PER_BYTE),
+        );
+        // `f64::ceil` rounds up so we never under-report the fee.
+        // Saturating cast handles the (unlikely) overflow case
+        // where a corrupt or malicious gas-price spike multiplied
+        // by a huge blob produces a value past u64::MAX.
+        let estimated_fee_utia =
+            (gas_price_utia_per_gas * estimated_gas as f64).ceil() as u64;
+        let fee_paid = Some(estimated_fee_utia.saturating_mul(NANO_TIA_PER_UTIA));
         let gas_used = None;
         let size_in_bytes = bytes as u64;
         Ok(SubmitBlobReceipt {
@@ -223,6 +277,14 @@ impl CelestiaService {
         }
 
         let tx_priority = config.tx_priority.clone().into();
+        // Live gas-price cache, shared between the periodic stat
+        // collection task (writer) and `submit_blob_to_namespace`
+        // (reader). Initialised to the calibration default so blobs
+        // submitted before the first poll completes still get a
+        // sensible `fee_paid` estimate.
+        let gas_price_estimate_utia_per_gas = Arc::new(AtomicU64::new(
+            DEFAULT_GAS_PRICE_UTIA_PER_GAS.to_bits(),
+        ));
         if config.background_stat_polling_interval_secs > 0 {
             if let Some(signer) = fetched_signer {
                 let bg_client = config
@@ -241,6 +303,7 @@ impl CelestiaService {
                     shutdown_receiver,
                     stat_polling_period,
                     stat_request_timeout,
+                    gas_price_estimate_utia_per_gas.clone(),
                 ));
             }
         }
@@ -255,6 +318,7 @@ impl CelestiaService {
             request_timeout,
             tx_priority,
             config.tx_status_polling_millis,
+            gas_price_estimate_utia_per_gas,
         )
     }
 }
@@ -640,6 +704,7 @@ async fn stat_collection_task(
     mut shutdown_receiver: tokio::sync::watch::Receiver<()>,
     period: Duration,
     request_timeout: Duration,
+    gas_price_estimate_utia_per_gas: Arc<AtomicU64>,
 ) {
     let chain_id = client.chain_id();
     tracing::info!(%chain_id, ?period, "Starting celestia stat collection task");
@@ -655,6 +720,12 @@ async fn stat_collection_task(
             _ = interval.tick() => {
                 match gather_stat(&client, &signer, priority, request_timeout).await {
                     Ok(measurement) => {
+                        // Publish the latest gas price to the cache
+                        // before submitting metrics, so a blob being
+                        // built right now picks up the freshest
+                        // number instead of the previous poll's.
+                        gas_price_estimate_utia_per_gas
+                            .store(measurement.gas_price.to_bits(), Ordering::Relaxed);
                         sov_metrics::track_metrics(|tracker| {
                             tracker.submit(measurement);
                         });
